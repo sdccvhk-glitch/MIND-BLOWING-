@@ -1,583 +1,756 @@
 package com.mindblow.app
 
-import android.content.Context
-import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
+import android.app.Activity
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.view.Gravity
-import android.view.View
-import android.widget.Button
-import android.widget.GridLayout
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
-import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
-import kotlin.math.max
+import android.graphics.*
+import android.graphics.drawable.GradientDrawable
+import android.view.*
+import android.widget.*
+import android.animation.ValueAnimator
+import kotlin.math.sin
 import kotlin.random.Random
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : Activity() {
 
-    private val bg = Color.rgb(7, 9, 22)
-    private val card = Color.rgb(23, 27, 50)
-    private val purple = Color.rgb(125, 75, 255)
-    private val cyan = Color.rgb(0, 220, 255)
-    private val pink = Color.rgb(255, 70, 170)
-    private val green = Color.rgb(55, 220, 145)
-    private val orange = Color.rgb(255, 165, 65)
+    private val bgColor = Color.rgb(8, 10, 24)
+    private val cardColor = Color.rgb(24, 27, 50)
     private val white = Color.WHITE
-    private val muted = Color.rgb(165, 173, 200)
-
-    private val handler = Handler(Looper.getMainLooper())
-    private val prefs by lazy {
-        getSharedPreferences("mindblow", Context.MODE_PRIVATE)
-    }
-
-    private var score = 0
-    private var streak = 0
+    private val cyan = Color.rgb(70, 220, 255)
+    private val purple = Color.rgb(150, 90, 255)
+    private val pink = Color.rgb(255, 80, 180)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        score = prefs.getInt("score", 0)
-        streak = prefs.getInt("streak", 0)
         showHome()
     }
 
+    // =========================================================
+    // HOME
+    // =========================================================
+
     private fun showHome() {
-        val root = baseLayout()
+        val root = animatedRoot()
 
-        val scroll = ScrollView(this)
-        val content = LinearLayout(this)
-        content.orientation = LinearLayout.VERTICAL
-        content.setPadding(22, 30, 22, 30)
-
-        val logo = text(
-            "✦ MINDBLOW",
-            30f,
+        val title = text(
+            "MIND",
+            42f,
             white,
             Gravity.CENTER
         )
-        content.addView(logo, lp(-1, 60))
+
+        title.setTypeface(null, Typeface.BOLD)
+
+        val title2 = text(
+            "BLOWING",
+            28f,
+            cyan,
+            Gravity.CENTER
+        )
+
+        title2.setTypeface(null, Typeface.BOLD)
 
         val subtitle = text(
-            "REFRESH • PLAY • THINK",
-            12f,
-            cyan,
+            "Refresh your mind • Challenge your brain",
+            15f,
+            Color.LTGRAY,
             Gravity.CENTER
         )
-        content.addView(subtitle, lp(-1, 35))
 
-        val hero = LinearLayout(this)
-        hero.orientation = LinearLayout.VERTICAL
-        hero.setPadding(24, 22, 24, 22)
-        hero.background = rounded(
-            Color.rgb(35, 25, 75),
-            28
-        )
+        root.addView(title, lp(-1, 55, 20, 45, 20, 0))
+        root.addView(title2, lp(-1, 45, 20, 0, 20, 0))
+        root.addView(subtitle, lp(-1, 40, 20, 5, 20, 20))
 
-        val heroSmall = text(
-            "TODAY'S CHALLENGE",
-            12f,
-            cyan,
-            Gravity.LEFT
-        )
+        val number = gameButton(
+            "🔢  NUMBER FLOW",
+            "Remember the sequence"
+        ) {
+            startNumberGame()
+        }
 
-        val heroTitle = text(
-            "Memory Rush",
-            27f,
-            white,
-            Gravity.LEFT
-        )
-
-        val heroDesc = text(
-            "Remember the cards and beat your best score.",
-            14f,
-            muted,
-            Gravity.LEFT
-        )
-
-        val play = Button(this)
-        play.text = "PLAY NOW  →"
-        play.textSize = 16f
-        play.setTextColor(white)
-        play.background = rounded(purple, 24)
-
-        play.setOnClickListener {
+        val memory = gameButton(
+            "🧩  MEMORY TILES",
+            "Find the matching tiles"
+        ) {
             startMemoryGame()
         }
 
-        hero.addView(heroSmall)
-        hero.addView(heroTitle, lp(-1, 48))
-        hero.addView(heroDesc, lp(-1, 45))
-        hero.addView(play, lp(-1, 55))
+        val reaction = gameButton(
+            "⚡  REACTION TAP",
+            "Test your reaction speed"
+        ) {
+            startReactionGame()
+        }
 
-        content.addView(hero, marginLp(-1, 225, 0, 18, 0, 0))
-
-        val stats = LinearLayout(this)
-        stats.orientation = LinearLayout.HORIZONTAL
-
-        stats.addView(statBox("🔥", streak.toString(), "STREAK"))
-        stats.addView(statBox("⭐", score.toString(), "XP"))
-        stats.addView(
-            statBox(
-                "🏆",
-                (score / 100 + 1).toString(),
-                "LEVEL"
-            )
-        )
-
-        content.addView(stats, marginLp(-1, 105, 0, 15, 0, 0))
-
-        val heading = text(
-            "QUICK GAMES",
-            20f,
-            white,
-            Gravity.LEFT
-        )
-        content.addView(heading, marginLp(-1, 45, 5, 0, 0, 0))
-
-        content.addView(
-            gameCard(
-                "🧠",
-                "Memory Match",
-                "Find matching pairs",
-                purple
-            ) {
-                startMemoryGame()
-            }
-        )
-
-        content.addView(
-            gameCard(
-                "⚡",
-                "Reaction Rush",
-                "Test your reaction speed",
-                cyan
-            ) {
-                startReactionGame()
-            }
-        )
-
-        content.addView(
-            gameCard(
-                "🎨",
-                "Color Mind",
-                "Match the correct color",
-                pink
-            ) {
-                startColorGame()
-            }
-        )
-
-        content.addView(
-            gameCard(
-                "🔢",
-                "Number Flow",
-                "Remember the number sequence",
-                orange
-            ) {
-                startNumberGame()
-            }
-        )
-
-        val progress = text(
-            "YOUR PROGRESS",
-            20f,
-            white,
-            Gravity.LEFT
-        )
-
-        content.addView(
-            progress,
-            marginLp(-1, 45, 15, 5, 0, 0)
-        )
-
-        val barBackground = LinearLayout(this)
-        barBackground.setBackgroundColor(Color.rgb(40, 44, 70))
-
-        val bar = View(this)
-        bar.background = rounded(cyan, 10)
-
-        val percent = (score % 100).coerceAtLeast(5)
-
-        barBackground.addView(
-            bar,
-            LinearLayout.LayoutParams(
-                0,
-                12,
-                percent.toFloat()
-            )
-        )
-
-        content.addView(
-            barBackground,
-            marginLp(-1, 12, 0, 20, 0, 0)
-        )
+        root.addView(number, lp(-1, 82, 25, 12, 25, 0))
+        root.addView(memory, lp(-1, 82, 25, 12, 25, 0))
+        root.addView(reaction, lp(-1, 82, 25, 12, 25, 0))
 
         val footer = text(
-            "Keep playing to increase your XP and unlock new challenges.",
-            13f,
-            muted,
+            "Choose a challenge and refresh your mind",
+            14f,
+            Color.GRAY,
             Gravity.CENTER
         )
 
-        content.addView(footer, lp(-1, 55))
-
-        scroll.addView(content)
-
-        root.addView(
-            scroll,
-            LinearLayout.LayoutParams(
-                -1,
-                0,
-                1f
-            )
-        )
-
-        root.addView(bottomNavigation())
+        root.addView(footer, lp(-1, 45, 20, 25, 20, 0))
 
         setContentView(root)
     }
 
-    // ---------------------------------------------------------
-    // MEMORY GAME
-    // ---------------------------------------------------------
-
-    private fun startMemoryGame() {
-        val root = gameRoot("MEMORY MATCH")
-
-        val info = text(
-            "Find all matching pairs",
-            16f,
-            muted,
-            Gravity.CENTER
-        )
-
-        root.addView(info, marginLp(-1, 45, 0, 10, 0, 0))
-
-        val grid = GridLayout(this)
-        grid.columnCount = 4
-        grid.rowCount = 3
-
-        val symbols = listOf(
-            "★", "★",
-            "●", "●",
-            "◆", "◆",
-            "♥", "♥",
-            "▲", "▲",
-            "☀", "☀"
-        ).shuffled()
-
-        val buttons = mutableListOf<Button>()
-        var firstIndex = -1
-        var locked = false
-        var matches = 0
-
-        fun finish() {
-            addXP(100)
-            showMessage("Amazing! +100 XP")
-            handler.postDelayed({
-                showHome()
-            }, 1000)
-        }
-
-        symbols.forEachIndexed { index, symbol ->
-
-            val b = Button(this)
-            b.text = "?"
-            b.textSize = 24f
-            b.setTextColor(white)
-            b.background = rounded(card, 18)
-
-            b.setOnClickListener {
-
-                if (locked || b.text != "?") return@setOnClickListener
-
-                b.text = symbol
-                b.setTextColor(cyan)
-
-                if (firstIndex == -1) {
-                    firstIndex = index
-                    return@setOnClickListener
-                }
-
-                if (symbols[firstIndex] == symbols[index]) {
-
-                    matches++
-                    buttons[firstIndex].isEnabled = false
-                    b.isEnabled = false
-                    firstIndex = -1
-
-                    if (matches == 6) {
-                        finish()
-                    }
-
-                } else {
-
-                    locked = true
-
-                    val previous = buttons[firstIndex]
-
-                    handler.postDelayed({
-
-                        previous.text = "?"
-                        b.text = "?"
-
-                        previous.setTextColor(white)
-                        b.setTextColor(white)
-
-                        firstIndex = -1
-                        locked = false
-
-                    }, 650)
-                }
-            }
-
-            buttons.add(b)
-
-            val params = GridLayout.LayoutParams()
-            params.width = 0
-            params.height = 100
-            params.columnSpec =
-                GridLayout.spec(GridLayout.UNDEFINED, 1f)
-            params.setMargins(6, 6, 6, 6)
-
-            grid.addView(b, params)
-        }
-
-        root.addView(
-            grid,
-            marginLp(-1, 330, 10, 20, 10, 0)
-        )
-
-        root.addView(backButton())
-        setContentView(root)
-    }
-
-    // ---------------------------------------------------------
-    // REACTION GAME
-    // ---------------------------------------------------------
-
-    private fun startReactionGame() {
-        val root = gameRoot("REACTION RUSH")
-
-        val title = text(
-            "Wait for GREEN...",
-            26f,
-            white,
-            Gravity.CENTER
-        )
-
-        root.addView(title, marginLp(-1, 80, 0, 20, 0, 0))
-
-        val target = Button(this)
-        target.text = "WAIT"
-        target.textSize = 25f
-        target.setTextColor(white)
-        target.background = rounded(Color.rgb(120, 35, 55), 35)
-
-        var ready = false
-        var startTime = 0L
-
-        target.setOnClickListener {
-
-            if (!ready) {
-                showMessage("Too early! Wait for green.")
-                return@setOnClickListener
-            }
-
-            val reaction = System.currentTimeMillis() - startTime
-            val gained = max(10, 100 - reaction.toInt() / 5)
-
-            addXP(gained)
-
-            target.text = "${reaction}ms"
-            title.text = "Great reaction!"
-
-            handler.postDelayed({
-                showHome()
-            }, 1200)
-        }
-
-        root.addView(
-            target,
-            marginLp(-1, 220, 30, 30, 30, 0)
-        )
-
-        root.addView(
-            text(
-                "Tap only when the button turns GREEN.",
-                14f,
-                muted,
-                Gravity.CENTER
-            ),
-            marginLp(-1, 50, 0, 30, 0, 0)
-        )
-
-        root.addView(backButton())
-
-        setContentView(root)
-
-        val delay = Random.nextLong(1500, 4000)
-
-        handler.postDelayed({
-
-            ready = true
-            startTime = System.currentTimeMillis()
-
-            target.text = "TAP!"
-            target.background = rounded(green, 35)
-
-        }, delay)
-    }
-
-    // ---------------------------------------------------------
-    // COLOR GAME
-    // ---------------------------------------------------------
-
-    private fun startColorGame() {
-        val root = gameRoot("COLOR MIND")
-
-        var points = 0
-        var round = 0
-
-        val question = text(
-            "",
-            27f,
-            white,
-            Gravity.CENTER
-        )
-
-        val result = text(
-            "",
-            15f,
-            muted,
-            Gravity.CENTER
-        )
-
-        root.addView(question, marginLp(-1, 80, 0, 15, 0, 0))
-        root.addView(result, marginLp(-1, 40, 0, 20, 0, 0))
-
-        val grid = GridLayout(this)
-        grid.columnCount = 2
-
-        val colors = listOf(
-            "RED" to Color.rgb(240, 65, 75),
-            "BLUE" to Color.rgb(55, 130, 255),
-            "GREEN" to Color.rgb(50, 210, 130),
-            "YELLOW" to Color.rgb(245, 200, 55)
-        )
-
-        fun nextRound() {
-
-            round++
-
-            if (round > 8) {
-                addXP(points * 10)
-                showMessage("+${points * 10} XP")
-
-                handler.postDelayed({
-                    showHome()
-                }, 1000)
-
-                return
-            }
-
-            val answer = colors.random()
-
-            question.text = "Tap: ${answer.first}"
-
-            grid.removeAllViews()
-
-            val choices = colors.shuffled()
-
-            choices.forEach { choice ->
-
-                val b = Button(this)
-                b.text = choice.first
-                b.textSize = 17f
-                b.setTextColor(white)
-                b.background = rounded(choice.second, 20)
-
-                b.setOnClickListener {
-
-                    if (choice.first == answer.first) {
-                        points++
-                        result.text = "Correct!  +10"
-                    } else {
-                        result.text = "Not quite!"
-                    }
-
-                    handler.postDelayed({
-                        nextRound()
-                    }, 400)
-                }
-
-                val p = GridLayout.LayoutParams()
-                p.width = 0
-                p.height = 90
-                p.columnSpec =
-                    GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                p.setMargins(7, 7, 7, 7)
-
-                grid.addView(b, p)
-            }
-        }
-
-        root.addView(
-            grid,
-            marginLp(-1, 220, 10, 25, 10, 0)
-        )
-
-        root.addView(backButton())
-
-        setContentView(root)
-
-        nextRound()
-    }
-
-    // ---------------------------------------------------------
+    // =========================================================
     // NUMBER FLOW
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun startNumberGame() {
+
         val root = gameRoot("NUMBER FLOW")
 
         val instruction = text(
-            "Remember the sequence",
-            22f,
+            "Memorize the number",
+            21f,
             white,
             Gravity.CENTER
         )
 
-        val sequenceView = text(
+        val sequence = text(
             "",
-            32f,
+            36f,
             cyan,
             Gravity.CENTER
         )
 
-        val input = TextView(this)
-        input.text = ""
-        input.textSize = 27f
+        val input = EditText(this)
+
+        input.hint = "Enter number"
+        input.textSize = 22f
         input.setTextColor(white)
+        input.setHintTextColor(Color.GRAY)
         input.gravity = Gravity.CENTER
-        input.background = rounded(card, 20)
+        input.inputType = 2
+        input.background = rounded(cardColor, 20f)
 
         val button = Button(this)
-        button.text = "START"
-        button.textSize = 17f
-        button.setTextColor(white)
-        button.background = rounded(purple, 25)
 
-        root.addView(instruction, marginLp(-1, 55, 0, 20, 0, 0))
-        root.addView(sequenceView, marginLp(-1, 80, 0, 15, 0, 0))
-        root.addView(input, marginLp(-1, 65, 25, 20, 25, 0))
-        root.addView(button, marginLp(-1, 60, 40, 20, 40, 0))
+        button.text = "START"
+        button.textSize = 16f
+        button.setTextColor(white)
+        button.background = rounded(purple, 25f)
+
+        root.addView(
+            instruction,
+            lp(-1, 50, 20, 20, 20, 10)
+        )
+
+        root.addView(
+            sequence,
+            lp(-1, 70, 20, 10, 20, 20)
+        )
+
+        root.addView(
+            input,
+            lp(-1, 65, 30, 10, 30, 15)
+        )
+
+        root.addView(
+            button,
+            lp(-1, 60, 45, 10, 45, 10)
+        )
+
         root.addView(backButton())
 
         setContentView(root)
 
         var level = 1
+        var answer = ""
+
+        button.setOnClickListener {
+
+            if (button.text == "START") {
+
+                input.setText("")
+                input.isEnabled = false
+                button.text = "SHOWING..."
+
+                answer = buildNumber(level)
+
+                sequence.text = answer
+
+                window.decorView.postDelayed({
+
+                    sequence.text = "••••"
+                    input.isEnabled = true
+                    button.text = "CHECK"
+
+                }, 1600)
+
+            } else {
+
+                if (input.text.toString() == answer) {
+
+                    Toast.makeText(
+                        this,
+                        "Correct! Level $level 🎉",
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                    level++
+
+                    input.setText("")
+                    sequence.text = "READY?"
+                    button.text = "START"
+
+                } else {
+
+                    Toast.makeText(
+                        this,
+                        "Try again!",
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                    level = 1
+                    input.setText("")
+                    sequence.text = "READY?"
+                    button.text = "START"
+                }
+            }
+        }
+    }
+
+    private fun buildNumber(level: Int): String {
+
+        val length = (3 + level).coerceAtMost(9)
+
+        val builder = StringBuilder()
+
+        repeat(length) {
+            builder.append(Random.nextInt(0, 10))
+        }
+
+        return builder.toString()
+    }
+
+    // =========================================================
+    // MEMORY GAME
+    // =========================================================
+
+    private fun startMemoryGame() {
+
+        val root = gameRoot("MEMORY TILES")
+
+        val info = text(
+            "Remember the highlighted tile",
+            19f,
+            white,
+            Gravity.CENTER
+        )
+
+        root.addView(
+            info,
+            lp(-1, 50, 20, 15, 20, 15)
+        )
+
+        val grid = GridLayout(this)
+
+        grid.columnCount = 3
+        grid.rowCount = 3
+
+        val buttons = ArrayList<Button>()
+        var target = Random.nextInt(0, 9)
+
+        for (i in 0 until 9) {
+
+            val b = Button(this)
+
+            b.text = "?"
+            b.textSize = 20f
+            b.setTextColor(white)
+            b.background = rounded(cardColor, 18f)
+
+            val params = GridLayout.LayoutParams()
+
+            params.width = 0
+            params.height = 90
+
+            params.columnSpec =
+                GridLayout.spec(GridLayout.UNDEFINED, 1f)
+
+            params.setMargins(6, 6, 6, 6)
+
+            grid.addView(b, params)
+
+            buttons.add(b)
+
+            b.setOnClickListener {
+
+                if (i == target) {
+
+                    Toast.makeText(
+                        this,
+                        "Correct! 🧠",
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                    target = Random.nextInt(0, 9)
+
+                    buttons.forEach {
+                        it.text = "?"
+                        it.setBackgroundColor(cardColor)
+                    }
+
+                    buttons[target].setBackgroundColor(purple)
+
+                    window.decorView.postDelayed({
+
+                        buttons[target].setBackgroundDrawable(
+                            rounded(cardColor, 18f)
+                        )
+
+                    }, 700)
+
+                } else {
+
+                    Toast.makeText(
+                        this,
+                        "Wrong tile!",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+
+        root.addView(
+            grid,
+            lp(-1, 330, 15, 10, 15, 10)
+        )
+
+        buttons[target].setBackgroundColor(purple)
+
+        window.decorView.postDelayed({
+
+            buttons[target].setBackgroundDrawable(
+                rounded(cardColor, 18f)
+            )
+
+        }, 900)
+
+        root.addView(backButton())
+
+        setContentView(root)
+    }
+
+    // =========================================================
+    // REACTION GAME
+    // =========================================================
+
+    private fun startReactionGame() {
+
+        val root = gameRoot("REACTION TAP")
+
+        val info = text(
+            "Wait for the screen to change...",
+            19f,
+            white,
+            Gravity.CENTER
+        )
+
+        val tap = Button(this)
+
+        tap.text = "WAIT..."
+        tap.textSize = 25f
+        tap.setTextColor(white)
+        tap.background = rounded(cardColor, 30f)
+
+        root.addView(
+            info,
+            lp(-1, 55, 20, 30, 20, 25)
+        )
+
+        root.addView(
+            tap,
+            lp(-1, 180, 40, 20, 40, 25)
+        )
+
+        root.addView(backButton())
+
+        setContentView(root)
+
+        tap.isEnabled = false
+
+        val delay = Random.nextLong(1500, 4000)
+
+        window.decorView.postDelayed({
+
+            tap.isEnabled = true
+            tap.text = "TAP NOW!"
+            tap.background = rounded(pink, 30f)
+
+            val startTime = System.currentTimeMillis()
+
+            tap.setOnClickListener {
+
+                val reaction =
+                    System.currentTimeMillis() - startTime
+
+                tap.text = "${reaction} ms"
+
+                info.text = "Your reaction time"
+
+                Toast.makeText(
+                    this,
+                    "$reaction ms ⚡",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+
+        }, delay)
+    }
+
+    // =========================================================
+    // MODERN ANIMATED BACKGROUND
+    // =========================================================
+
+    private fun animatedRoot(): FrameLayout {
+
+        val frame = FrameLayout(this)
+
+        val backgroundView = AnimatedBackground()
+
+        frame.addView(
+            backgroundView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        val content = LinearLayout(this)
+
+        content.orientation = LinearLayout.VERTICAL
+        content.gravity = Gravity.CENTER_HORIZONTAL
+
+        val scroll = ScrollView(this)
+
+        scroll.addView(
+            content,
+            ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT,
+                ScrollView.LayoutParams.WRAP_CONTENT
+            )
+        )
+
+        frame.addView(
+            scroll,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        return frame
+    }
+
+    private fun gameRoot(title: String): LinearLayout {
+
+        val frame = animatedRoot()
+
+        val content = frame.getChildAt(1) as ScrollView
+        val root = content.getChildAt(0) as LinearLayout
+
+        val titleView = text(
+            title,
+            29f,
+            white,
+            Gravity.CENTER
+        )
+
+        titleView.setTypeface(null, Typeface.BOLD)
+
+        root.addView(
+            titleView,
+            lp(-1, 60, 20, 35, 20, 10)
+        )
+
+        return root
+    }
+
+    // =========================================================
+    // BUTTONS
+    // =========================================================
+
+    private fun gameButton(
+        title: String,
+        description: String,
+        action: () -> Unit
+    ): LinearLayout {
+
+        val box = LinearLayout(this)
+
+        box.orientation = LinearLayout.VERTICAL
+        box.gravity = Gravity.CENTER_VERTICAL
+        box.setPadding(22, 8, 22, 8)
+        box.background = rounded(cardColor, 25f)
+
+        val titleView = text(
+            title,
+            19f,
+            white,
+            Gravity.CENTER_VERTICAL
+        )
+
+        titleView.setTypeface(null, Typeface.BOLD)
+
+        val descView = text(
+            description,
+            13f,
+            Color.LTGRAY,
+            Gravity.CENTER_VERTICAL
+        )
+
+        box.addView(
+            titleView,
+            LinearLayout.LayoutParams(
+                -1,
+                35
+            )
+        )
+
+        box.addView(
+            descView,
+            LinearLayout.LayoutParams(
+                -1,
+                30
+            )
+        )
+
+        box.setOnClickListener {
+            action()
+        }
+
+        return box
+    }
+
+    private fun backButton(): Button {
+
+        val button = Button(this)
+
+        button.text = "← BACK"
+        button.textSize = 16f
+        button.setTextColor(white)
+        button.background = rounded(cardColor, 25f)
+
+        button.setOnClickListener {
+            showHome()
+        }
+
+        button.layoutParams = lp(
+            -1,
+            60,
+            35,
+            25,
+            35,
+            25
+        )
+
+        return button
+    }
+
+    // =========================================================
+    // UI HELPERS
+    // =========================================================
+
+    private fun text(
+        value: String,
+        size: Float,
+        color: Int,
+        gravityValue: Int
+    ): TextView {
+
+        val view = TextView(this)
+
+        view.text = value
+        view.textSize = size
+        view.setTextColor(color)
+        view.gravity = gravityValue
+
+        return view
+    }
+
+    private fun rounded(
+        color: Int,
+        radius: Float
+    ): GradientDrawable {
+
+        val drawable = GradientDrawable()
+
+        drawable.setColor(color)
+        drawable.cornerRadius = radius
+
+        return drawable
+    }
+
+    private fun lp(
+        width: Int,
+        height: Int,
+        left: Int,
+        top: Int,
+        right: Int,
+        bottom: Int
+    ): LinearLayout.LayoutParams {
+
+        val params = LinearLayout.LayoutParams(
+            if (width == -1)
+                LinearLayout.LayoutParams.MATCH_PARENT
+            else
+                width,
+
+            height
+        )
+
+        params.setMargins(
+            left,
+            top,
+            right,
+            bottom
+        )
+
+        return params
+    }
+
+    // =========================================================
+    // ANIMATED BACKGROUND VIEW
+    // =========================================================
+
+    private inner class AnimatedBackground :
+        View(this) {
+
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        private var time = 0f
+
+        private val animator =
+            ValueAnimator.ofFloat(0f, 360f).apply {
+
+                duration = 12000
+
+                repeatCount = ValueAnimator.INFINITE
+
+                addUpdateListener {
+
+                    time = it.animatedValue as Float
+
+                    invalidate()
+                }
+            }
+
+        init {
+            setBackgroundColor(bgColor)
+
+            animator.start()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+
+            super.onDraw(canvas)
+
+            val w = width.toFloat()
+            val h = height.toFloat()
+
+            paint.shader = LinearGradient(
+                0f,
+                0f,
+                w,
+                h,
+                Color.rgb(8, 10, 24),
+                Color.rgb(24, 8, 45),
+                Shader.TileMode.CLAMP
+            )
+
+            canvas.drawRect(
+                0f,
+                0f,
+                w,
+                h,
+                paint
+            )
+
+            paint.shader = null
+
+            drawOrb(
+                canvas,
+                w * 0.15f +
+                        sin(Math.toRadians(time.toDouble()))
+                            .toFloat() * 70f,
+                h * 0.20f,
+                150f,
+                Color.argb(55, 70, 220, 255)
+            )
+
+            drawOrb(
+                canvas,
+                w * 0.80f +
+                        sin(Math.toRadians(time * 1.4))
+                            .toFloat() * 90f,
+                h * 0.38f,
+                190f,
+                Color.argb(45, 150, 90, 255)
+            )
+
+            drawOrb(
+                canvas,
+                w * 0.35f +
+                        sin(Math.toRadians(time * 0.8))
+                            .toFloat() * 100f,
+                h * 0.78f,
+                210f,
+                Color.argb(35, 255, 80, 180)
+            )
+
+            paint.color = Color.argb(25, 255, 255, 255)
+
+            for (i in 0 until 18) {
+
+                val x =
+                    ((i * 97) % width).toFloat()
+
+                val y =
+                    ((i * 173 +
+                            time * (8 + i % 4)) %
+                            height).toFloat()
+
+                canvas.drawCircle(
+                    x,
+                    y,
+                    2.5f,
+                    paint
+                )
+            }
+        }
+
+        private fun drawOrb(
+            canvas: Canvas,
+            x: Float,
+            y: Float,
+            radius: Float,
+            color: Int
+        ) {
+
+            paint.shader = RadialGradient(
+                x,
+                y,
+                radius,
+                color,
+                Color.TRANSPARENT,
+                Shader.TileMode.CLAMP
+            )
+
+            canvas.drawCircle(
+                x,
+                y,
+                radius,
+                paint
+            )
+
+            paint.shader = null
+        }
+    }
+}

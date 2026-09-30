@@ -60,7 +60,6 @@ private class MindBlowView(context: Context) : View(context) {
         }
 
     private var splashStarted = System.currentTimeMillis()
-
     private var animationTime = 0f
 
     private var score = prefs.getInt("score", 0)
@@ -68,6 +67,7 @@ private class MindBlowView(context: Context) : View(context) {
 
     // Puzzle
     private var puzzleTarget = Random.nextInt(16)
+    private var puzzleRound = 1
 
     // Memory
     private val symbols = arrayOf(
@@ -76,19 +76,24 @@ private class MindBlowView(context: Context) : View(context) {
         "✿", "❖", "♣"
     )
 
-    private var memoryBoard =
-        MutableList(9) { it }.apply { shuffle() }
-
+    private var memoryBoard = MutableList(9) { it }.apply { shuffle() }
     private var memoryFirst = -1
     private var memorySecond = -1
     private var memoryPreviewUntil = 0L
+    private var memoryMatches = 0
 
     // Focus
     private var focusHits = 0
-    private var focusTarget = 0
+    private var focusTargetX = 0f
+    private var focusTargetY = 0f
+    private var focusTargetRadius = 28f
+    private var focusStarted = false
 
     // Relax
     private var relaxTaps = 0
+
+    // Daily
+    private var dailyCompleted = prefs.getBoolean("daily_completed", false)
 
     private var message = ""
     private var messageUntil = 0L
@@ -127,7 +132,7 @@ private class MindBlowView(context: Context) : View(context) {
 
         if (
             screen == Screen.SPLASH &&
-            System.currentTimeMillis() - splashStarted > 1500L
+            System.currentTimeMillis() - splashStarted > 1400L
         ) {
             screen = Screen.WELCOME
         }
@@ -135,9 +140,9 @@ private class MindBlowView(context: Context) : View(context) {
         postInvalidateDelayed(16L)
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // BACKGROUND
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawBackground(
         canvas: Canvas,
@@ -154,53 +159,28 @@ private class MindBlowView(context: Context) : View(context) {
             Shader.TileMode.CLAMP
         )
 
-        canvas.drawRect(
-            0f,
-            0f,
-            w,
-            h,
-            paint
-        )
-
+        canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
 
         val t = animationTime
 
-        paint.color = Color.argb(
-            42,
-            20,
-            220,
-            255
-        )
-
+        paint.color = Color.argb(45, 20, 220, 255)
         canvas.drawCircle(
-            w * 0.18f + sin(t) * 35f,
-            h * 0.20f + cos(t) * 28f,
+            w * 0.16f + sin(t) * 35f,
+            h * 0.18f + cos(t) * 25f,
             145f,
             paint
         )
 
-        paint.color = Color.argb(
-            35,
-            155,
-            70,
-            255
-        )
-
+        paint.color = Color.argb(36, 155, 70, 255)
         canvas.drawCircle(
-            w * 0.82f + cos(t * 0.8f) * 40f,
+            w * 0.84f + cos(t * 0.8f) * 40f,
             h * 0.38f + sin(t) * 35f,
             165f,
             paint
         )
 
-        paint.color = Color.argb(
-            25,
-            30,
-            255,
-            180
-        )
-
+        paint.color = Color.argb(26, 30, 255, 180)
         canvas.drawCircle(
             w * 0.50f + sin(t * 0.6f) * 45f,
             h * 0.84f,
@@ -210,14 +190,9 @@ private class MindBlowView(context: Context) : View(context) {
 
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1f
-        paint.color = Color.argb(
-            22,
-            100,
-            220,
-            255
-        )
+        paint.color = Color.argb(22, 100, 220, 255)
 
-        for (i in 0 until 6) {
+        for (i in 0 until 7) {
             canvas.drawCircle(
                 w / 2f,
                 h * 0.43f,
@@ -229,9 +204,9 @@ private class MindBlowView(context: Context) : View(context) {
         paint.style = Paint.Style.FILL
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // TEXT
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun text(
         canvas: Canvas,
@@ -247,23 +222,17 @@ private class MindBlowView(context: Context) : View(context) {
         paint.color = color
         paint.textSize = size
         paint.textAlign = align
-
         paint.typeface = Typeface.create(
             "sans-serif",
             if (bold) Typeface.BOLD else Typeface.NORMAL
         )
 
-        canvas.drawText(
-            value,
-            x,
-            y,
-            paint
-        )
+        canvas.drawText(value, x, y, paint)
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // CARD
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawCard(
         canvas: Canvas,
@@ -274,12 +243,7 @@ private class MindBlowView(context: Context) : View(context) {
         radius: Float = 20f
     ) {
         paint.shader = null
-        paint.color = Color.argb(
-            225,
-            13,
-            19,
-            46
-        )
+        paint.color = Color.argb(225, 13, 19, 46)
 
         canvas.drawRoundRect(
             left,
@@ -293,12 +257,7 @@ private class MindBlowView(context: Context) : View(context) {
 
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.2f
-        paint.color = Color.argb(
-            65,
-            110,
-            160,
-            230
-        )
+        paint.color = Color.argb(65, 110, 160, 230)
 
         canvas.drawRoundRect(
             left,
@@ -313,9 +272,9 @@ private class MindBlowView(context: Context) : View(context) {
         paint.style = Paint.Style.FILL
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // BUTTON
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawButton(
         canvas: Canvas,
@@ -359,24 +318,16 @@ private class MindBlowView(context: Context) : View(context) {
         )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // HEADER
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawHeader(
         canvas: Canvas,
         title: String,
         subtitle: String
     ) {
-        text(
-            canvas,
-            "‹",
-            22f,
-            50f,
-            38f,
-            Color.WHITE,
-            false
-        )
+        text(canvas, "‹", 22f, 51f, 38f, Color.WHITE)
 
         text(
             canvas,
@@ -398,9 +349,9 @@ private class MindBlowView(context: Context) : View(context) {
         )
     }
 
-    // ---------------------------------------------------------
-    // BOTTOM NAV
-    // ---------------------------------------------------------
+    // =========================================================
+    // NAVIGATION
+    // =========================================================
 
     private fun drawNavigation(
         canvas: Canvas,
@@ -419,14 +370,7 @@ private class MindBlowView(context: Context) : View(context) {
             23f
         )
 
-        val icons = arrayOf(
-            "⌂",
-            "◆",
-            "◎",
-            "★",
-            "●"
-        )
-
+        val icons = arrayOf("⌂", "◆", "◎", "★", "●")
         val names = arrayOf(
             "Home",
             "Games",
@@ -436,7 +380,6 @@ private class MindBlowView(context: Context) : View(context) {
         )
 
         for (i in 0..4) {
-
             val x = w * (i + 0.5f) / 5f
 
             val color =
@@ -470,21 +413,23 @@ private class MindBlowView(context: Context) : View(context) {
         }
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // SPLASH
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawSplash(
         canvas: Canvas,
         w: Float,
         h: Float
     ) {
+        val pulse = 1f + sin(animationTime * 3f) * 0.08f
+
         text(
             canvas,
             "✦",
             w / 2f,
             h * 0.39f,
-            78f,
+            78f * pulse,
             0xff62e8ff.toInt(),
             true,
             Paint.Align.CENTER
@@ -513,9 +458,9 @@ private class MindBlowView(context: Context) : View(context) {
         )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // WELCOME
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawWelcome(
         canvas: Canvas,
@@ -598,9 +543,9 @@ private class MindBlowView(context: Context) : View(context) {
         )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // HOME
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawHome(
         canvas: Canvas,
@@ -685,7 +630,7 @@ private class MindBlowView(context: Context) : View(context) {
 
         drawButton(
             canvas,
-            "DAILY CHALLENGE  ›",
+            "DAILY CHALLENGE ›",
             34f,
             174f,
             w - 34f,
@@ -746,17 +691,8 @@ private class MindBlowView(context: Context) : View(context) {
             452f
         )
 
-        drawNavigation(
-            canvas,
-            w,
-            h,
-            0
-        )
+        drawNavigation(canvas, w, h, 0)
     }
-
-    // ---------------------------------------------------------
-    // GAME CARD
-    // ---------------------------------------------------------
 
     private fun drawGameCard(
         canvas: Canvas,
@@ -808,9 +744,9 @@ private class MindBlowView(context: Context) : View(context) {
         )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // GAMES
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawGames(
         canvas: Canvas,
@@ -904,17 +840,12 @@ private class MindBlowView(context: Context) : View(context) {
             426f
         )
 
-        drawNavigation(
-            canvas,
-            w,
-            h,
-            1
-        )
+        drawNavigation(canvas, w, h, 1)
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // PUZZLE
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawPuzzle(
         canvas: Canvas,
@@ -927,41 +858,39 @@ private class MindBlowView(context: Context) : View(context) {
             "Find the glowing tile"
         )
 
-        val size = min(
-            w * 0.78f,
-            310f
+        text(
+            canvas,
+            "ROUND $puzzleRound",
+            w / 2f,
+            91f,
+            12f,
+            0xff6be7ff.toInt(),
+            true,
+            Paint.Align.CENTER
         )
 
+        val size = min(w * 0.78f, 310f)
         val left = (w - size) / 2f
         val top = 105f
         val cell = size / 4f
 
         for (i in 0 until 16) {
-
             val row = i / 4
             val col = i % 4
 
             val l = left + col * cell + 4f
-            val t = top + row * cell + 4f
+            val tt = top + row * cell + 4f
             val r = left + (col + 1) * cell - 4f
             val b = top + (row + 1) * cell - 4f
 
-            drawCard(
-                canvas,
-                l,
-                t,
-                r,
-                b,
-                13f
-            )
+            drawCard(canvas, l, tt, r, b, 13f)
 
             if (i == puzzleTarget) {
-
                 paint.color = 0xff48e7ff.toInt()
 
                 canvas.drawCircle(
                     (l + r) / 2f,
-                    (t + b) / 2f,
+                    (tt + b) / 2f,
                     16f + sin(animationTime * 3f) * 4f,
                     paint
                 )
@@ -991,9 +920,9 @@ private class MindBlowView(context: Context) : View(context) {
         )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // MEMORY
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawMemory(
         canvas: Canvas,
@@ -1006,11 +935,18 @@ private class MindBlowView(context: Context) : View(context) {
             "Remember the symbols"
         )
 
-        val size = min(
-            w * 0.78f,
-            315f
+        text(
+            canvas,
+            "MATCHES $memoryMatches / 4",
+            w / 2f,
+            91f,
+            12f,
+            0xff6be7ff.toInt(),
+            true,
+            Paint.Align.CENTER
         )
 
+        val size = min(w * 0.82f, 320f)
         val left = (w - size) / 2f
         val top = 105f
         val cell = size / 3f
@@ -1019,46 +955,44 @@ private class MindBlowView(context: Context) : View(context) {
             System.currentTimeMillis() < memoryPreviewUntil
 
         for (i in 0 until 9) {
-
             val row = i / 3
             val col = i % 3
 
             val l = left + col * cell + 5f
-            val t = top + row * cell + 5f
+            val tt = top + row * cell + 5f
             val r = left + (col + 1) * cell - 5f
             val b = top + (row + 1) * cell - 5f
 
-            drawCard(
-                canvas,
-                l,
-                t,
-                r,
-                b,
-                15f
-            )
+            drawCard(canvas, l, tt, r, b, 15f)
 
-            val reveal =
+            val revealed =
                 preview ||
                 i == memoryFirst ||
                 i == memorySecond
 
-            val value =
-                if (reveal) {
-                    symbols[memoryBoard[i]]
-                } else {
-                    "?"
-                }
-
-            text(
-                canvas,
-                value,
-                (l + r) / 2f,
-                (t + b) / 2f + 10f,
-                27f,
-                0xff67ddff.toInt(),
-                true,
-                Paint.Align.CENTER
-            )
+            if (revealed) {
+                text(
+                    canvas,
+                    symbols[memoryBoard[i]],
+                    (l + r) / 2f,
+                    (tt + b) / 2f + 10f,
+                    28f,
+                    0xff67ddff.toInt(),
+                    true,
+                    Paint.Align.CENTER
+                )
+            } else {
+                text(
+                    canvas,
+                    "?",
+                    (l + r) / 2f,
+                    (tt + b) / 2f + 10f,
+                    27f,
+                    0xff59658f.toInt(),
+                    true,
+                    Paint.Align.CENTER
+                )
+            }
         }
 
         text(
@@ -1069,7 +1003,7 @@ private class MindBlowView(context: Context) : View(context) {
                 "Tap two cards"
             },
             w / 2f,
-            top + size + 30f,
+            top + size + 32f,
             14f,
             0xffaeb8d7.toInt(),
             false,
@@ -1077,9 +1011,9 @@ private class MindBlowView(context: Context) : View(context) {
         )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // FOCUS
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawFocus(
         canvas: Canvas,
@@ -1094,7 +1028,7 @@ private class MindBlowView(context: Context) : View(context) {
 
         text(
             canvas,
-            "Hits $focusHits",
+            "HITS  $focusHits",
             24f,
             94f,
             15f,
@@ -1102,68 +1036,104 @@ private class MindBlowView(context: Context) : View(context) {
             true
         )
 
-        for (i in 0 until 4) {
+        if (!focusStarted) {
+            drawCard(
+                canvas,
+                30f,
+                150f,
+                w - 30f,
+                350f,
+                24f
+            )
 
-            val angle =
-                animationTime * (1f + i * 0.08f) +
-                i * 1.57f
+            text(
+                canvas,
+                "FOCUS TEST",
+                w / 2f,
+                205f,
+                14f,
+                0xff62e8ff.toInt(),
+                true,
+                Paint.Align.CENTER
+            )
 
-            val x =
-                w / 2f +
-                cos(angle.toDouble()).toFloat() *
-                w * 0.27f
+            text(
+                canvas,
+                "Tap the moving target",
+                w / 2f,
+                245f,
+                22f,
+                Color.WHITE,
+                true,
+                Paint.Align.CENTER
+            )
 
-            val y =
-                245f +
-                sin((angle * 1.2f).toDouble()).toFloat() *
-                105f
+            text(
+                canvas,
+                "Stay alert and follow the glow.",
+                w / 2f,
+                275f,
+                13f,
+                0xffaeb8d8.toInt(),
+                false,
+                Paint.Align.CENTER
+            )
 
-            val active =
-                i == focusTarget
-
-            paint.color =
-                if (active) {
-                    0xff4feaff.toInt()
-                } else {
-                    0xff7655dc.toInt()
-                }
+            drawButton(
+                canvas,
+                "START",
+                55f,
+                300f,
+                w - 55f,
+                350f
+            )
+        } else {
+            paint.color = 0xff55e8ff.toInt()
 
             canvas.drawCircle(
-                x,
-                y,
-                if (active) {
-                    23f + 5f * sin(animationTime * 3f)
-                } else {
-                    15f
-                },
+                focusTargetX,
+                focusTargetY,
+                focusTargetRadius +
+                    sin(animationTime * 5f) * 5f,
                 paint
             )
+
+            paint.color = 0xff9b6cff.toInt()
+
+            canvas.drawCircle(
+                focusTargetX,
+                focusTargetY,
+                focusTargetRadius * 0.45f,
+                paint
+            )
+
+            text(
+                canvas,
+                "FOLLOW THE GLOW",
+                w / 2f,
+                h - 130f,
+                13f,
+                0xffaeb8d8.toInt(),
+                true,
+                Paint.Align.CENTER
+            )
+
+            text(
+                canvas,
+                "+5 XP each hit",
+                w / 2f,
+                h - 105f,
+                11f,
+                0xff7884ad.toInt(),
+                false,
+                Paint.Align.CENTER
+            )
         }
-
-        drawCard(
-            canvas,
-            24f,
-            430f,
-            w - 24f,
-            495f,
-            19f
-        )
-
-        text(
-            canvas,
-            "Tap the bright circle",
-            w / 2f,
-            462f,
-            14f,
-            0xffbac4e3.toInt(),
-            false,
-            Paint.Align.CENTER
-        )
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // RELAX
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawRelax(
         canvas: Canvas,
@@ -1177,23 +1147,24 @@ private class MindBlowView(context: Context) : View(context) {
         )
 
         val cx = w / 2f
-        val cy = 245f
+        val cy = h * 0.43f
 
-        for (i in 0..5) {
+        val pulse =
+            1f + (sin(animationTime * 1.6f) + 1f) * 0.16f
 
-            paint.color = Color.argb(
-                34 - i * 4,
-                50,
-                210,
-                255
-            )
+        for (i in 0..6) {
+            paint.color =
+                Color.argb(
+                    maxAlpha(38 - i * 5),
+                    50,
+                    210,
+                    255
+                )
 
             canvas.drawCircle(
                 cx,
                 cy,
-                45f +
-                    i * 36f +
-                    sin(animationTime + i) * 7f,
+                (45f + i * 35f) * pulse,
                 paint
             )
         }
@@ -1202,19 +1173,26 @@ private class MindBlowView(context: Context) : View(context) {
             canvas,
             "◈",
             cx,
-            cy + 25f,
+            cy + 24f,
             68f,
             0xff8d7cff.toInt(),
             true,
             Paint.Align.CENTER
         )
 
+        val phase =
+            if ((animationTime % 8f) < 4f) {
+                "BREATHE IN"
+            } else {
+                "BREATHE OUT"
+            }
+
         text(
             canvas,
-            "Slow down",
+            phase,
             cx,
-            380f,
-            28f,
+            cy + 110f,
+            19f,
             Color.WHITE,
             true,
             Paint.Align.CENTER
@@ -1222,10 +1200,10 @@ private class MindBlowView(context: Context) : View(context) {
 
         text(
             canvas,
-            "Tap anywhere for a calming ripple",
+            "Tap anywhere to create a calming ripple",
             cx,
-            410f,
-            14f,
+            cy + 145f,
+            13f,
             0xffaeb8d8.toInt(),
             false,
             Paint.Align.CENTER
@@ -1235,17 +1213,21 @@ private class MindBlowView(context: Context) : View(context) {
             canvas,
             "Relax taps: $relaxTaps",
             cx,
-            450f,
+            cy + 180f,
             12f,
-            0xff6bdfff.toInt(),
+            0xff7884ad.toInt(),
             false,
             Paint.Align.CENTER
         )
     }
 
-    // ---------------------------------------------------------
+    private fun maxAlpha(value: Int): Int {
+        return value.coerceIn(0, 255)
+    }
+
+    // =========================================================
     // DAILY
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawDaily(
         canvas: Canvas,
@@ -1263,7 +1245,7 @@ private class MindBlowView(context: Context) : View(context) {
             18f,
             90f,
             w - 18f,
-            275f,
+            300f,
             24f
         )
 
@@ -1279,9 +1261,13 @@ private class MindBlowView(context: Context) : View(context) {
 
         text(
             canvas,
-            "Clear your mind",
+            if (dailyCompleted) {
+                "Challenge complete!"
+            } else {
+                "Clear your mind"
+            },
             38f,
-            164f,
+            165f,
             24f,
             Color.WHITE,
             true
@@ -1289,61 +1275,73 @@ private class MindBlowView(context: Context) : View(context) {
 
         text(
             canvas,
-            "Complete a quick challenge and",
+            if (dailyCompleted) {
+                "Come back tomorrow for another challenge."
+            } else {
+                "Complete this quick challenge and"
+            },
             38f,
-            192f,
+            195f,
             13f,
             0xffaeb8d7.toInt()
         )
 
-        text(
-            canvas,
-            "earn a little XP.",
-            38f,
-            213f,
-            13f,
-            0xffaeb8d7.toInt()
-        )
+        if (!dailyCompleted) {
+            text(
+                canvas,
+                "earn +50 XP.",
+                38f,
+                217f,
+                13f,
+                0xffaeb8d7.toInt()
+            )
 
-        drawButton(
-            canvas,
-            "PLAY NOW",
-            38f,
-            225f,
-            w - 38f,
-            262f
-        )
+            drawButton(
+                canvas,
+                "COMPLETE CHALLENGE",
+                38f,
+                235f,
+                w - 38f,
+                278f
+            )
+        } else {
+            text(
+                canvas,
+                "✓ +50 XP earned",
+                38f,
+                252f,
+                16f,
+                0xff5de7b2.toInt(),
+                true
+            )
+        }
 
         text(
             canvas,
             "🔥  $streak day streak",
             22f,
-            322f,
+            345f,
             19f,
             0xffffb52e.toInt(),
             true
         )
 
-        drawButton(
+        text(
             canvas,
-            "CLAIM +50 XP",
+            "Total XP: $score",
             22f,
-            350f,
-            w - 22f,
-            402f
+            378f,
+            14f,
+            0xffaeb8d8.toInt(),
+            false
         )
 
-        drawNavigation(
-            canvas,
-            w,
-            h,
-            3
-        )
+        drawNavigation(canvas, w, h, 3)
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // PROFILE
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawProfile(
         canvas: Canvas,
@@ -1361,15 +1359,15 @@ private class MindBlowView(context: Context) : View(context) {
             18f,
             85f,
             w - 18f,
-            210f,
+            220f,
             24f
         )
 
         text(
             canvas,
             "✦",
-            62f,
-            153f,
+            65f,
+            155f,
             52f,
             0xff68ddff.toInt(),
             true,
@@ -1399,16 +1397,16 @@ private class MindBlowView(context: Context) : View(context) {
             canvas,
             "$score XP",
             105f,
-            184f,
+            180f,
             13f,
             0xff8f9bc4.toInt()
         )
 
         text(
             canvas,
-            "Games  ${score / 25}",
+            "Games completed: ${score / 25}",
             35f,
-            258f,
+            260f,
             16f,
             Color.WHITE,
             true
@@ -1416,7 +1414,7 @@ private class MindBlowView(context: Context) : View(context) {
 
         text(
             canvas,
-            "Streak  $streak",
+            "Streak: $streak days",
             35f,
             292f,
             16f,
@@ -1429,7 +1427,7 @@ private class MindBlowView(context: Context) : View(context) {
             18f,
             320f,
             w - 18f,
-            430f,
+            455f,
             22f
         )
 
@@ -1446,7 +1444,7 @@ private class MindBlowView(context: Context) : View(context) {
             canvas,
             "♫  Sound & Music",
             38f,
-            398f,
+            400f,
             16f,
             Color.WHITE
         )
@@ -1455,22 +1453,17 @@ private class MindBlowView(context: Context) : View(context) {
             canvas,
             "☾  Dark Theme",
             38f,
-            438f,
+            442f,
             16f,
             Color.WHITE
         )
 
-        drawNavigation(
-            canvas,
-            w,
-            h,
-            4
-        )
+        drawNavigation(canvas, w, h, 4)
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // TOAST
-    // ---------------------------------------------------------
+    // =========================================================
 
     private fun drawToast(
         canvas: Canvas,
@@ -1479,10 +1472,10 @@ private class MindBlowView(context: Context) : View(context) {
     ) {
         drawCard(
             canvas,
-            28f,
-            h - 132f,
-            w - 28f,
-            h - 84f,
+            25f,
+            h - 135f,
+            w - 25f,
+            h - 83f,
             18f
         )
 
@@ -1500,20 +1493,20 @@ private class MindBlowView(context: Context) : View(context) {
 
     private fun showMessage(value: String) {
         message = value
-        messageUntil =
-            System.currentTimeMillis() + 1400L
+        messageUntil = System.currentTimeMillis() + 1400L
     }
 
-    private fun saveProgress() {
+    private fun save() {
         prefs.edit()
             .putInt("score", score)
             .putInt("streak", streak)
+            .putBoolean("daily_completed", dailyCompleted)
             .apply()
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // TOUCH
-    // ---------------------------------------------------------
+    // =========================================================
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
 
@@ -1529,7 +1522,7 @@ private class MindBlowView(context: Context) : View(context) {
         when (screen) {
 
             Screen.SPLASH -> {
-                // Splash automatically advances.
+                screen = Screen.WELCOME
             }
 
             Screen.WELCOME -> {
@@ -1543,35 +1536,35 @@ private class MindBlowView(context: Context) : View(context) {
             }
 
             Screen.HOME -> {
-                handleHomeTouch(x, y, w, h)
+                homeTouch(x, y, w, h)
             }
 
             Screen.GAMES -> {
-                handleGamesTouch(x, y, w, h)
+                gamesTouch(x, y, w, h)
             }
 
             Screen.PUZZLE -> {
-                handlePuzzleTouch(x, y, w)
+                puzzleTouch(x, y, w, h)
             }
 
             Screen.MEMORY -> {
-                handleMemoryTouch(x, y, w)
+                memoryTouch(x, y, w, h)
             }
 
             Screen.FOCUS -> {
-                handleFocusTouch(x, y, w)
+                focusTouch(x, y, w, h)
             }
 
             Screen.RELAX -> {
-                handleRelaxTouch(y)
+                relaxTouch(y)
             }
 
             Screen.DAILY -> {
-                handleDailyTouch(x, y, w, h)
+                dailyTouch(y, w)
             }
 
             Screen.PROFILE -> {
-                handleProfileTouch(y)
+                profileTouch(y)
             }
         }
 
@@ -1579,18 +1572,17 @@ private class MindBlowView(context: Context) : View(context) {
         return true
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // HOME TOUCH
-    // ---------------------------------------------------------
+    // =========================================================
 
-    private fun handleHomeTouch(
+    private fun homeTouch(
         x: Float,
         y: Float,
         w: Float,
         h: Float
     ) {
-
-        if (y > h - 100f) {
+        if (y > h - 95f) {
 
             when {
                 x < w * 0.20f -> {
@@ -1602,6 +1594,7 @@ private class MindBlowView(context: Context) : View(context) {
                 }
 
                 x < w * 0.60f -> {
+                    focusStarted = false
                     screen = Screen.FOCUS
                 }
 
@@ -1622,9 +1615,10 @@ private class MindBlowView(context: Context) : View(context) {
             return
         }
 
-        if (y in 255f..355f) {
-
+        if (y in 250f..355f) {
             if (x < w / 2f) {
+                puzzleRound = 1
+                puzzleTarget = Random.nextInt(16)
                 screen = Screen.PUZZLE
             } else {
                 startMemory()
@@ -1634,8 +1628,8 @@ private class MindBlowView(context: Context) : View(context) {
         }
 
         if (y in 355f..465f) {
-
             if (x < w / 2f) {
+                focusStarted = false
                 screen = Screen.FOCUS
             } else {
                 screen = Screen.RELAX
@@ -1643,28 +1637,30 @@ private class MindBlowView(context: Context) : View(context) {
         }
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // GAMES TOUCH
-    // ---------------------------------------------------------
+    // =========================================================
 
-    private fun handleGamesTouch(
+    private fun gamesTouch(
         x: Float,
         y: Float,
         w: Float,
         h: Float
     ) {
-
         if (y < 80f) {
             screen = Screen.HOME
             return
         }
 
-        if (y > h - 100f) {
+        if (y > h - 95f) {
 
             when {
                 x < w * 0.20f -> screen = Screen.HOME
                 x < w * 0.40f -> screen = Screen.GAMES
-                x < w * 0.60f -> screen = Screen.FOCUS
+                x < w * 0.60f -> {
+                    focusStarted = false
+                    screen = Screen.FOCUS
+                }
                 x < w * 0.80f -> screen = Screen.DAILY
                 else -> screen = Screen.PROFILE
             }
@@ -1675,6 +1671,8 @@ private class MindBlowView(context: Context) : View(context) {
         if (y in 90f..210f) {
 
             if (x < w / 2f) {
+                puzzleRound = 1
+                puzzleTarget = Random.nextInt(16)
                 screen = Screen.PUZZLE
             } else {
                 startMemory()
@@ -1683,9 +1681,10 @@ private class MindBlowView(context: Context) : View(context) {
             return
         }
 
-        if (y in 215f..335f) {
+        if (y in 210f..335f) {
 
             if (x < w / 2f) {
+                focusStarted = false
                 screen = Screen.FOCUS
             } else {
                 screen = Screen.RELAX
@@ -1694,31 +1693,27 @@ private class MindBlowView(context: Context) : View(context) {
             return
         }
 
-        if (y in 340f..440f) {
+        if (y in 335f..445f) {
             screen = Screen.DAILY
         }
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // PUZZLE TOUCH
-    // ---------------------------------------------------------
+    // =========================================================
 
-    private fun handlePuzzleTouch(
+    private fun puzzleTouch(
         x: Float,
         y: Float,
-        w: Float
+        w: Float,
+        h: Float
     ) {
-
         if (y < 80f) {
             screen = Screen.GAMES
             return
         }
 
-        val size = min(
-            w * 0.78f,
-            310f
-        )
-
+        val size = min(w * 0.78f, 310f)
         val left = (w - size) / 2f
         val top = 105f
         val cell = size / 4f
@@ -1747,10 +1742,11 @@ private class MindBlowView(context: Context) : View(context) {
         if (index == puzzleTarget) {
 
             score += 25
+            puzzleRound++
 
             puzzleTarget = Random.nextInt(16)
 
-            saveProgress()
+            save()
 
             showMessage(
                 "Correct! +25 XP"
@@ -1759,21 +1755,38 @@ private class MindBlowView(context: Context) : View(context) {
         } else {
 
             showMessage(
-                "Try the glowing tile"
+                "Try the glowing tile!"
             )
         }
     }
 
-    // ---------------------------------------------------------
-    // MEMORY TOUCH
-    // ---------------------------------------------------------
+    // =========================================================
+    // MEMORY
+    // =========================================================
 
-    private fun handleMemoryTouch(
+    private fun startMemory() {
+
+        memoryBoard =
+            MutableList(9) { it }.apply {
+                shuffle()
+            }
+
+        memoryFirst = -1
+        memorySecond = -1
+        memoryMatches = 0
+
+        memoryPreviewUntil =
+            System.currentTimeMillis() + 2200L
+
+        screen = Screen.MEMORY
+    }
+
+    private fun memoryTouch(
         x: Float,
         y: Float,
-        w: Float
+        w: Float,
+        h: Float
     ) {
-
         if (y < 80f) {
             screen = Screen.GAMES
             return
@@ -1786,11 +1799,7 @@ private class MindBlowView(context: Context) : View(context) {
             return
         }
 
-        val size = min(
-            w * 0.78f,
-            315f
-        )
-
+        val size = min(w * 0.82f, 320f)
         val left = (w - size) / 2f
         val top = 105f
         val cell = size / 3f
@@ -1816,16 +1825,15 @@ private class MindBlowView(context: Context) : View(context) {
 
         val index = row * 3 + col
 
-        if (memoryFirst == -1) {
-
-            memoryFirst = index
+        if (index == memoryFirst) {
             return
         }
 
-        if (
-            memorySecond == -1 &&
-            index != memoryFirst
-        ) {
+        if (memoryFirst == -1) {
+
+            memoryFirst = index
+
+        } else if (memorySecond == -1) {
 
             memorySecond = index
 
@@ -1834,126 +1842,114 @@ private class MindBlowView(context: Context) : View(context) {
                 memoryBoard[memorySecond]
             ) {
 
+                memoryMatches++
                 score += 20
 
-                saveProgress()
+                save()
 
                 showMessage(
                     "Match! +20 XP"
                 )
 
-                postDelayed({
+                postDelayed(
+                    {
+                        memoryFirst = -1
+                        memorySecond = -1
 
-                    memoryFirst = -1
-                    memorySecond = -1
+                        if (memoryMatches >= 4) {
+                            showMessage(
+                                "Memory cleared! +50 XP"
+                            )
+                            score += 50
+                            save()
+                        }
 
-                    memoryBoard =
-                        MutableList(9) { it }
-                            .apply { shuffle() }
-
-                    memoryPreviewUntil =
-                        System.currentTimeMillis() + 1200L
-
-                    invalidate()
-
-                }, 500L)
+                        invalidate()
+                    },
+                    500L
+                )
 
             } else {
 
-                showMessage(
-                    "Not a match"
+                showMessage("Not a match")
+
+                postDelayed(
+                    {
+                        memoryFirst = -1
+                        memorySecond = -1
+                        invalidate()
+                    },
+                    650L
                 )
-
-                postDelayed({
-
-                    memoryFirst = -1
-                    memorySecond = -1
-
-                    invalidate()
-
-                }, 700L)
             }
         }
     }
 
-    private fun startMemory() {
+    // =========================================================
+    // FOCUS
+    // =========================================================
 
-        memoryBoard =
-            MutableList(9) { it }
-                .apply { shuffle() }
+    private fun startFocus(w: Float, h: Float) {
 
-        memoryFirst = -1
-        memorySecond = -1
+        focusStarted = true
 
-        memoryPreviewUntil =
-            System.currentTimeMillis() + 2200L
+        focusTargetX =
+            Random.nextFloat() *
+                (w - 100f) + 50f
 
-        screen = Screen.MEMORY
+        focusTargetY =
+            Random.nextFloat() *
+                (h - 330f) + 150f
+
+        focusTargetRadius =
+            Random.nextInt(22, 34).toFloat()
     }
 
-    // ---------------------------------------------------------
-    // FOCUS TOUCH
-    // ---------------------------------------------------------
-
-    private fun handleFocusTouch(
+    private fun focusTouch(
         x: Float,
         y: Float,
-        w: Float
+        w: Float,
+        h: Float
     ) {
-
         if (y < 80f) {
             screen = Screen.GAMES
             return
         }
 
-        val angle =
-            animationTime *
-            (1f + focusTarget * 0.08f) +
-            focusTarget * 1.57f
+        if (!focusStarted) {
 
-        val targetX =
-            w / 2f +
-            cos(angle.toDouble()).toFloat() *
-            w * 0.27f
+            startFocus(w, h)
+            return
+        }
 
-        val targetY =
-            245f +
-            sin((angle * 1.2f).toDouble()).toFloat() *
-            105f
+        val dx = x - focusTargetX
+        val dy = y - focusTargetY
 
-        val dx = x - targetX
-        val dy = y - targetY
+        val distance =
+            kotlin.math.sqrt(
+                dx * dx + dy * dy
+            )
 
-        val distanceSquared =
-            dx * dx + dy * dy
-
-        if (distanceSquared < 45f * 45f) {
+        if (distance <= focusTargetRadius + 20f) {
 
             focusHits++
             score += 5
 
-            focusTarget =
-                Random.nextInt(4)
-
-            saveProgress()
+            save()
 
             showMessage(
                 "Great focus! +5 XP"
             )
 
-        } else {
-
-            showMessage(
-                "Follow the bright glow"
-            )
+            startFocus(w, h)
         }
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // RELAX TOUCH
-    // ---------------------------------------------------------
+    // =========================================================
 
-    private fun handleRelaxTouch(y: Float) {
+    private fun relaxTouch(y: Float) {
 
         if (y < 80f) {
             screen = Screen.GAMES
@@ -1963,91 +1959,68 @@ private class MindBlowView(context: Context) : View(context) {
         relaxTaps++
 
         if (relaxTaps % 5 == 0) {
-
             score += 5
-
-            saveProgress()
+            save()
 
             showMessage(
-                "Nice and calm! +5 XP"
+                "Calm moment +5 XP"
             )
-
         } else {
-
             showMessage(
-                "Breathe in... and out..."
+                "Breathe in... breathe out..."
             )
         }
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // DAILY TOUCH
-    // ---------------------------------------------------------
+    // =========================================================
 
-    private fun handleDailyTouch(
-        x: Float,
+    private fun dailyTouch(
         y: Float,
-        w: Float,
-        h: Float
+        w: Float
     ) {
-
         if (y < 80f) {
             screen = Screen.HOME
             return
         }
 
-        if (y > h - 100f) {
-
-            when {
-                x < w * 0.20f -> screen = Screen.HOME
-                x < w * 0.40f -> screen = Screen.GAMES
-                x < w * 0.60f -> screen = Screen.FOCUS
-                x < w * 0.80f -> screen = Screen.DAILY
-                else -> screen = Screen.PROFILE
-            }
-
+        if (y > hMinusNavigation()) {
             return
         }
 
-        if (y in 215f..275f) {
+        if (!dailyCompleted && y in 220f..300f) {
 
+            dailyCompleted = true
             score += 50
             streak++
 
-            saveProgress()
+            save()
 
             showMessage(
                 "Daily complete! +50 XP"
             )
         }
-
-        if (y in 340f..420f) {
-
-            score += 50
-            streak++
-
-            saveProgress()
-
-            showMessage(
-                "Reward claimed! +50 XP"
-            )
-        }
     }
 
-    // ---------------------------------------------------------
-    // PROFILE TOUCH
-    // ---------------------------------------------------------
+    private fun hMinusNavigation(): Float {
+        return height.toFloat() - 95f
+    }
 
-    private fun handleProfileTouch(y: Float) {
+    // =========================================================
+    // PROFILE TOUCH
+    // =========================================================
+
+    private fun profileTouch(y: Float) {
 
         if (y < 80f) {
             screen = Screen.HOME
         }
     }
 
-    // ---------------------------------------------------------
+    // =========================================================
     // BACK
-    // ---------------------------------------------------------
+    // =========================================================
 
     fun goBack(): Boolean {
 
@@ -2056,16 +2029,16 @@ private class MindBlowView(context: Context) : View(context) {
             Screen.SPLASH -> false
 
             Screen.WELCOME -> {
-                screen = Screen.SPLASH
-                invalidate()
-                true
+                false
             }
 
-            Screen.HOME -> false
+            Screen.HOME -> {
+                false
+            }
 
             Screen.GAMES,
-            Screen.DAILY,
-            Screen.PROFILE -> {
+            Screen.PROFILE,
+            Screen.DAILY -> {
                 screen = Screen.HOME
                 invalidate()
                 true

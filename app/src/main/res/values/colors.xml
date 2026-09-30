@@ -1,1 +1,10 @@
-
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="mindblow_purple">#7C4DFF</color>
+    <color name="mindblow_blue">#00E5FF</color>
+    <color name="mindblow_background">#080B1A</color>
+    <color name="mindblow_surface">#12172B</color>
+    <color name="mindblow_card">#191F38</color>
+    <color name="mindblow_text">#FFFFFF</color>
+    <color name="mindblow_text_secondary">#A9B0C7</color>
+</resources>

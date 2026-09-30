@@ -1,361 +1,583 @@
 package com.mindblow.app
 
+import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
+import android.view.View
 import android.widget.Button
+import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import kotlin.math.max
+import kotlin.random.Random
 
 class MainActivity : AppCompatActivity() {
 
-    private val backgroundColor = Color.rgb(8, 11, 26)
-    private val cardColor = Color.rgb(25, 31, 56)
-    private val purple = Color.rgb(124, 77, 255)
-    private val cyan = Color.rgb(0, 229, 255)
+    private val bg = Color.rgb(7, 9, 22)
+    private val card = Color.rgb(23, 27, 50)
+    private val purple = Color.rgb(125, 75, 255)
+    private val cyan = Color.rgb(0, 220, 255)
+    private val pink = Color.rgb(255, 70, 170)
+    private val green = Color.rgb(55, 220, 145)
+    private val orange = Color.rgb(255, 165, 65)
     private val white = Color.WHITE
-    private val secondary = Color.rgb(169, 176, 199)
+    private val muted = Color.rgb(165, 173, 200)
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val prefs by lazy {
+        getSharedPreferences("mindblow", Context.MODE_PRIVATE)
+    }
+
+    private var score = 0
+    private var streak = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        score = prefs.getInt("score", 0)
+        streak = prefs.getInt("streak", 0)
         showHome()
     }
 
     private fun showHome() {
+        val root = baseLayout()
 
-        val root = LinearLayout(this)
-        root.orientation = LinearLayout.VERTICAL
-        root.setBackgroundColor(backgroundColor)
-
-        val scrollView = ScrollView(this)
-
+        val scroll = ScrollView(this)
         val content = LinearLayout(this)
         content.orientation = LinearLayout.VERTICAL
-        content.setPadding(24, 30, 24, 30)
+        content.setPadding(22, 30, 22, 30)
 
-        val logo = TextView(this)
-        logo.text = "✦ MINDBLOW"
-        logo.textSize = 28f
-        logo.setTextColor(white)
-        logo.gravity = Gravity.CENTER
+        val logo = text(
+            "✦ MINDBLOW",
+            30f,
+            white,
+            Gravity.CENTER
+        )
+        content.addView(logo, lp(-1, 60))
 
-        content.addView(
-            logo,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                60
-            )
+        val subtitle = text(
+            "REFRESH • PLAY • THINK",
+            12f,
+            cyan,
+            Gravity.CENTER
+        )
+        content.addView(subtitle, lp(-1, 35))
+
+        val hero = LinearLayout(this)
+        hero.orientation = LinearLayout.VERTICAL
+        hero.setPadding(24, 22, 24, 22)
+        hero.background = rounded(
+            Color.rgb(35, 25, 75),
+            28
         )
 
-        val subtitle = TextView(this)
-        subtitle.text = "Relax • Focus • Feel Better"
-        subtitle.textSize = 15f
-        subtitle.setTextColor(cyan)
-        subtitle.gravity = Gravity.CENTER
-
-        content.addView(
-            subtitle,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                45
-            )
+        val heroSmall = text(
+            "TODAY'S CHALLENGE",
+            12f,
+            cyan,
+            Gravity.LEFT
         )
 
-        val title = TextView(this)
-        title.text = "Refresh your mind ✨"
-        title.textSize = 25f
-        title.setTextColor(white)
-        title.setPadding(0, 20, 0, 5)
-
-        content.addView(title)
-
-        val description = TextView(this)
-        description.text =
-            "Choose a short activity and take a break from your day."
-        description.textSize = 15f
-        description.setTextColor(secondary)
-
-        content.addView(description)
-
-        content.addView(
-            createCard(
-                "🌟  Daily Challenge",
-                "A fresh challenge waiting for you",
-                purple
-            ) {
-                showMessage("Daily Challenge coming soon!")
-            }
+        val heroTitle = text(
+            "Memory Rush",
+            27f,
+            white,
+            Gravity.LEFT
         )
 
-        val modes = TextView(this)
-        modes.text = "Mind Modes"
-        modes.textSize = 21f
-        modes.setTextColor(white)
-        modes.setPadding(0, 25, 0, 10)
-
-        content.addView(modes)
-
-        content.addView(
-            createCard(
-                "🧩  Puzzle",
-                "Train your problem solving",
-                purple
-            ) {
-                showMessage("Puzzle mode coming soon!")
-            }
+        val heroDesc = text(
+            "Remember the cards and beat your best score.",
+            14f,
+            muted,
+            Gravity.LEFT
         )
 
-        content.addView(
-            createCard(
-                "🧠  Memory",
-                "Improve your memory",
-                cyan
-            ) {
-                showMessage("Memory mode coming soon!")
-            }
-        )
+        val play = Button(this)
+        play.text = "PLAY NOW  →"
+        play.textSize = 16f
+        play.setTextColor(white)
+        play.background = rounded(purple, 24)
 
-        content.addView(
-            createCard(
-                "🎯  Focus",
-                "Build your concentration",
-                Color.rgb(255, 170, 60)
-            ) {
-                showMessage("Focus mode coming soon!")
-            }
-        )
+        play.setOnClickListener {
+            startMemoryGame()
+        }
 
-        content.addView(
-            createCard(
-                "🌿  Relax",
-                "Slow down and breathe",
-                Color.rgb(70, 210, 150)
-            ) {
-                showMessage("Relax mode coming soon!")
-            }
-        )
+        hero.addView(heroSmall)
+        hero.addView(heroTitle, lp(-1, 48))
+        hero.addView(heroDesc, lp(-1, 45))
+        hero.addView(play, lp(-1, 55))
 
-        val progressTitle = TextView(this)
-        progressTitle.text = "Your Progress"
-        progressTitle.textSize = 21f
-        progressTitle.setTextColor(white)
-        progressTitle.setPadding(0, 25, 0, 10)
-
-        content.addView(progressTitle)
+        content.addView(hero, marginLp(-1, 225, 0, 18, 0, 0))
 
         val stats = LinearLayout(this)
         stats.orientation = LinearLayout.HORIZONTAL
 
-        stats.addView(createStat("🔥", "0", "Streak"))
-        stats.addView(createStat("⭐", "0", "XP"))
-        stats.addView(createStat("🏆", "0", "Badges"))
-
-        content.addView(stats)
-
-        val playButton = Button(this)
-        playButton.text = "PLAY NOW  →"
-        playButton.textSize = 17f
-        playButton.setTextColor(white)
-        playButton.background = roundedBackground(purple, 28)
-
-        playButton.setOnClickListener {
-            showMessage("Choose a Mind Mode!")
-        }
-
-        val playParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            60
+        stats.addView(statBox("🔥", streak.toString(), "STREAK"))
+        stats.addView(statBox("⭐", score.toString(), "XP"))
+        stats.addView(
+            statBox(
+                "🏆",
+                (score / 100 + 1).toString(),
+                "LEVEL"
+            )
         )
-        playParams.setMargins(0, 30, 0, 10)
 
-        content.addView(playButton, playParams)
+        content.addView(stats, marginLp(-1, 105, 0, 15, 0, 0))
 
-        scrollView.addView(content)
+        val heading = text(
+            "QUICK GAMES",
+            20f,
+            white,
+            Gravity.LEFT
+        )
+        content.addView(heading, marginLp(-1, 45, 5, 0, 0, 0))
+
+        content.addView(
+            gameCard(
+                "🧠",
+                "Memory Match",
+                "Find matching pairs",
+                purple
+            ) {
+                startMemoryGame()
+            }
+        )
+
+        content.addView(
+            gameCard(
+                "⚡",
+                "Reaction Rush",
+                "Test your reaction speed",
+                cyan
+            ) {
+                startReactionGame()
+            }
+        )
+
+        content.addView(
+            gameCard(
+                "🎨",
+                "Color Mind",
+                "Match the correct color",
+                pink
+            ) {
+                startColorGame()
+            }
+        )
+
+        content.addView(
+            gameCard(
+                "🔢",
+                "Number Flow",
+                "Remember the number sequence",
+                orange
+            ) {
+                startNumberGame()
+            }
+        )
+
+        val progress = text(
+            "YOUR PROGRESS",
+            20f,
+            white,
+            Gravity.LEFT
+        )
+
+        content.addView(
+            progress,
+            marginLp(-1, 45, 15, 5, 0, 0)
+        )
+
+        val barBackground = LinearLayout(this)
+        barBackground.setBackgroundColor(Color.rgb(40, 44, 70))
+
+        val bar = View(this)
+        bar.background = rounded(cyan, 10)
+
+        val percent = (score % 100).coerceAtLeast(5)
+
+        barBackground.addView(
+            bar,
+            LinearLayout.LayoutParams(
+                0,
+                12,
+                percent.toFloat()
+            )
+        )
+
+        content.addView(
+            barBackground,
+            marginLp(-1, 12, 0, 20, 0, 0)
+        )
+
+        val footer = text(
+            "Keep playing to increase your XP and unlock new challenges.",
+            13f,
+            muted,
+            Gravity.CENTER
+        )
+
+        content.addView(footer, lp(-1, 55))
+
+        scroll.addView(content)
 
         root.addView(
-            scrollView,
+            scroll,
             LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
+                -1,
                 0,
                 1f
             )
         )
 
-        val navigation = LinearLayout(this)
-        navigation.orientation = LinearLayout.HORIZONTAL
-        navigation.gravity = Gravity.CENTER
-        navigation.setBackgroundColor(cardColor)
-
-        navigation.addView(
-            navButton("⌂\nHome") {
-                showHome()
-            }
-        )
-
-        navigation.addView(
-            navButton("🏆\nProgress") {
-                showMessage("Progress coming soon!")
-            }
-        )
-
-        navigation.addView(
-            navButton("👤\nProfile") {
-                showMessage("Profile coming soon!")
-            }
-        )
-
-        navigation.addView(
-            navButton("⚙\nSettings") {
-                showMessage("Settings coming soon!")
-            }
-        )
-
-        root.addView(
-            navigation,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                70
-            )
-        )
+        root.addView(bottomNavigation())
 
         setContentView(root)
     }
 
-    private fun createCard(
-        title: String,
-        subtitle: String,
-        accent: Int,
-        action: () -> Unit
-    ): LinearLayout {
+    // ---------------------------------------------------------
+    // MEMORY GAME
+    // ---------------------------------------------------------
 
-        val card = LinearLayout(this)
-        card.orientation = LinearLayout.VERTICAL
-        card.setPadding(22, 15, 22, 15)
-        card.background = roundedBackground(cardColor, 22)
-        card.elevation = 6f
+    private fun startMemoryGame() {
+        val root = gameRoot("MEMORY MATCH")
 
-        val titleView = TextView(this)
-        titleView.text = title
-        titleView.textSize = 19f
-        titleView.setTextColor(white)
+        val info = text(
+            "Find all matching pairs",
+            16f,
+            muted,
+            Gravity.CENTER
+        )
 
-        val subtitleView = TextView(this)
-        subtitleView.text = subtitle
-        subtitleView.textSize = 13f
-        subtitleView.setTextColor(secondary)
-        subtitleView.setPadding(0, 6, 0, 0)
+        root.addView(info, marginLp(-1, 45, 0, 10, 0, 0))
 
-        card.addView(titleView)
-        card.addView(subtitleView)
+        val grid = GridLayout(this)
+        grid.columnCount = 4
+        grid.rowCount = 3
 
-        card.setOnClickListener {
-            action()
+        val symbols = listOf(
+            "★", "★",
+            "●", "●",
+            "◆", "◆",
+            "♥", "♥",
+            "▲", "▲",
+            "☀", "☀"
+        ).shuffled()
+
+        val buttons = mutableListOf<Button>()
+        var firstIndex = -1
+        var locked = false
+        var matches = 0
+
+        fun finish() {
+            addXP(100)
+            showMessage("Amazing! +100 XP")
+            handler.postDelayed({
+                showHome()
+            }, 1000)
         }
 
-        val params = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            85
+        symbols.forEachIndexed { index, symbol ->
+
+            val b = Button(this)
+            b.text = "?"
+            b.textSize = 24f
+            b.setTextColor(white)
+            b.background = rounded(card, 18)
+
+            b.setOnClickListener {
+
+                if (locked || b.text != "?") return@setOnClickListener
+
+                b.text = symbol
+                b.setTextColor(cyan)
+
+                if (firstIndex == -1) {
+                    firstIndex = index
+                    return@setOnClickListener
+                }
+
+                if (symbols[firstIndex] == symbols[index]) {
+
+                    matches++
+                    buttons[firstIndex].isEnabled = false
+                    b.isEnabled = false
+                    firstIndex = -1
+
+                    if (matches == 6) {
+                        finish()
+                    }
+
+                } else {
+
+                    locked = true
+
+                    val previous = buttons[firstIndex]
+
+                    handler.postDelayed({
+
+                        previous.text = "?"
+                        b.text = "?"
+
+                        previous.setTextColor(white)
+                        b.setTextColor(white)
+
+                        firstIndex = -1
+                        locked = false
+
+                    }, 650)
+                }
+            }
+
+            buttons.add(b)
+
+            val params = GridLayout.LayoutParams()
+            params.width = 0
+            params.height = 100
+            params.columnSpec =
+                GridLayout.spec(GridLayout.UNDEFINED, 1f)
+            params.setMargins(6, 6, 6, 6)
+
+            grid.addView(b, params)
+        }
+
+        root.addView(
+            grid,
+            marginLp(-1, 330, 10, 20, 10, 0)
         )
-        params.setMargins(0, 7, 0, 7)
 
-        card.layoutParams = params
-
-        return card
+        root.addView(backButton())
+        setContentView(root)
     }
 
-    private fun createStat(
-        icon: String,
-        number: String,
-        label: String
-    ): LinearLayout {
+    // ---------------------------------------------------------
+    // REACTION GAME
+    // ---------------------------------------------------------
 
-        val box = LinearLayout(this)
-        box.orientation = LinearLayout.VERTICAL
-        box.gravity = Gravity.CENTER
-        box.setPadding(5, 8, 5, 8)
-        box.background = roundedBackground(cardColor, 18)
+    private fun startReactionGame() {
+        val root = gameRoot("REACTION RUSH")
 
-        val iconView = TextView(this)
-        iconView.text = icon
-        iconView.textSize = 22f
-        iconView.gravity = Gravity.CENTER
-
-        val numberView = TextView(this)
-        numberView.text = number
-        numberView.textSize = 19f
-        numberView.setTextColor(white)
-        numberView.gravity = Gravity.CENTER
-
-        val labelView = TextView(this)
-        labelView.text = label
-        labelView.textSize = 12f
-        labelView.setTextColor(secondary)
-        labelView.gravity = Gravity.CENTER
-
-        box.addView(iconView)
-        box.addView(numberView)
-        box.addView(labelView)
-
-        val params = LinearLayout.LayoutParams(
-            0,
-            95,
-            1f
+        val title = text(
+            "Wait for GREEN...",
+            26f,
+            white,
+            Gravity.CENTER
         )
-        params.setMargins(4, 0, 4, 0)
 
-        box.layoutParams = params
+        root.addView(title, marginLp(-1, 80, 0, 20, 0, 0))
 
-        return box
+        val target = Button(this)
+        target.text = "WAIT"
+        target.textSize = 25f
+        target.setTextColor(white)
+        target.background = rounded(Color.rgb(120, 35, 55), 35)
+
+        var ready = false
+        var startTime = 0L
+
+        target.setOnClickListener {
+
+            if (!ready) {
+                showMessage("Too early! Wait for green.")
+                return@setOnClickListener
+            }
+
+            val reaction = System.currentTimeMillis() - startTime
+            val gained = max(10, 100 - reaction.toInt() / 5)
+
+            addXP(gained)
+
+            target.text = "${reaction}ms"
+            title.text = "Great reaction!"
+
+            handler.postDelayed({
+                showHome()
+            }, 1200)
+        }
+
+        root.addView(
+            target,
+            marginLp(-1, 220, 30, 30, 30, 0)
+        )
+
+        root.addView(
+            text(
+                "Tap only when the button turns GREEN.",
+                14f,
+                muted,
+                Gravity.CENTER
+            ),
+            marginLp(-1, 50, 0, 30, 0, 0)
+        )
+
+        root.addView(backButton())
+
+        setContentView(root)
+
+        val delay = Random.nextLong(1500, 4000)
+
+        handler.postDelayed({
+
+            ready = true
+            startTime = System.currentTimeMillis()
+
+            target.text = "TAP!"
+            target.background = rounded(green, 35)
+
+        }, delay)
     }
 
-    private fun navButton(
-        text: String,
-        action: () -> Unit
-    ): TextView {
+    // ---------------------------------------------------------
+    // COLOR GAME
+    // ---------------------------------------------------------
 
-        val button = TextView(this)
+    private fun startColorGame() {
+        val root = gameRoot("COLOR MIND")
 
-        button.text = text
-        button.textSize = 12f
+        var points = 0
+        var round = 0
+
+        val question = text(
+            "",
+            27f,
+            white,
+            Gravity.CENTER
+        )
+
+        val result = text(
+            "",
+            15f,
+            muted,
+            Gravity.CENTER
+        )
+
+        root.addView(question, marginLp(-1, 80, 0, 15, 0, 0))
+        root.addView(result, marginLp(-1, 40, 0, 20, 0, 0))
+
+        val grid = GridLayout(this)
+        grid.columnCount = 2
+
+        val colors = listOf(
+            "RED" to Color.rgb(240, 65, 75),
+            "BLUE" to Color.rgb(55, 130, 255),
+            "GREEN" to Color.rgb(50, 210, 130),
+            "YELLOW" to Color.rgb(245, 200, 55)
+        )
+
+        fun nextRound() {
+
+            round++
+
+            if (round > 8) {
+                addXP(points * 10)
+                showMessage("+${points * 10} XP")
+
+                handler.postDelayed({
+                    showHome()
+                }, 1000)
+
+                return
+            }
+
+            val answer = colors.random()
+
+            question.text = "Tap: ${answer.first}"
+
+            grid.removeAllViews()
+
+            val choices = colors.shuffled()
+
+            choices.forEach { choice ->
+
+                val b = Button(this)
+                b.text = choice.first
+                b.textSize = 17f
+                b.setTextColor(white)
+                b.background = rounded(choice.second, 20)
+
+                b.setOnClickListener {
+
+                    if (choice.first == answer.first) {
+                        points++
+                        result.text = "Correct!  +10"
+                    } else {
+                        result.text = "Not quite!"
+                    }
+
+                    handler.postDelayed({
+                        nextRound()
+                    }, 400)
+                }
+
+                val p = GridLayout.LayoutParams()
+                p.width = 0
+                p.height = 90
+                p.columnSpec =
+                    GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                p.setMargins(7, 7, 7, 7)
+
+                grid.addView(b, p)
+            }
+        }
+
+        root.addView(
+            grid,
+            marginLp(-1, 220, 10, 25, 10, 0)
+        )
+
+        root.addView(backButton())
+
+        setContentView(root)
+
+        nextRound()
+    }
+
+    // ---------------------------------------------------------
+    // NUMBER FLOW
+    // ---------------------------------------------------------
+
+    private fun startNumberGame() {
+        val root = gameRoot("NUMBER FLOW")
+
+        val instruction = text(
+            "Remember the sequence",
+            22f,
+            white,
+            Gravity.CENTER
+        )
+
+        val sequenceView = text(
+            "",
+            32f,
+            cyan,
+            Gravity.CENTER
+        )
+
+        val input = TextView(this)
+        input.text = ""
+        input.textSize = 27f
+        input.setTextColor(white)
+        input.gravity = Gravity.CENTER
+        input.background = rounded(card, 20)
+
+        val button = Button(this)
+        button.text = "START"
+        button.textSize = 17f
         button.setTextColor(white)
-        button.gravity = Gravity.CENTER
-        button.setPadding(5, 5, 5, 5)
+        button.background = rounded(purple, 25)
 
-        button.setOnClickListener {
-            action()
-        }
+        root.addView(instruction, marginLp(-1, 55, 0, 20, 0, 0))
+        root.addView(sequenceView, marginLp(-1, 80, 0, 15, 0, 0))
+        root.addView(input, marginLp(-1, 65, 25, 20, 25, 0))
+        root.addView(button, marginLp(-1, 60, 40, 20, 40, 0))
+        root.addView(backButton())
 
-        button.layoutParams = LinearLayout.LayoutParams(
-            0,
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            1f
-        )
+        setContentView(root)
 
-        return button
-    }
-
-    private fun roundedBackground(
-        color: Int,
-        radius: Int
-    ): GradientDrawable {
-
-        val drawable = GradientDrawable()
-        drawable.setColor(color)
-        drawable.cornerRadius = radius.toFloat()
-
-        return drawable
-    }
-
-    private fun showMessage(message: String) {
-
-        Toast.makeText(
-            this,
-            message,
-            Toast.LENGTH_SHORT
-        ).show()
-    }
-}
+        var level = 1

@@ -1,15 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">MindBlow</string>
-    <string name="welcome_title">Relax. Focus. Feel Better.</string>
-    <string name="welcome_subtitle">Refresh your mind with short, calming challenges.</string>
-    <string name="play_now">Play Now</string>
-    <string name="puzzle">Puzzle</string>
-    <string name="memory">Memory</string>
-    <string name="focus">Focus</string>
-    <string name="relax">Relax</string>
-    <string name="daily_challenge">Daily Challenge</string>
-    <string name="achievements">Achievements</string>
-    <string name="profile">Profile</string>
-    <string name="settings">Settings</string>
+
+    <style name="Theme.MindBlow" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/mindblow_background</item>
+        <item name="android:navigationBarColor">@color/mindblow_background</item>
+        <item name="android:windowBackground">@color/mindblow_background</item>
+        <item name="android:colorAccent">@color/mindblow_purple</item>
+    </style>
+
 </resources>

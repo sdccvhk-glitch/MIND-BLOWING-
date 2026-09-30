@@ -1,1 +1,15 @@
-
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MindBlow</string>
+    <string name="welcome_title">Relax. Focus. Feel Better.</string>
+    <string name="welcome_subtitle">Refresh your mind with short, calming challenges.</string>
+    <string name="play_now">Play Now</string>
+    <string name="puzzle">Puzzle</string>
+    <string name="memory">Memory</string>
+    <string name="focus">Focus</string>
+    <string name="relax">Relax</string>
+    <string name="daily_challenge">Daily Challenge</string>
+    <string name="achievements">Achievements</string>
+    <string name="profile">Profile</string>
+    <string name="settings">Settings</string>
+</resources>

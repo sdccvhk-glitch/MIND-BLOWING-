@@ -2,14 +2,8 @@ package com.mindblow.app
 
 import android.app.Activity
 import android.content.Context
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.LinearGradient
-import android.graphics.Paint
-import android.graphics.Shader
-import android.graphics.Typeface
+import android.graphics.*
 import android.os.Bundle
-import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.cos
@@ -24,14 +18,14 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        window.statusBarColor = Color.rgb(4, 7, 24)
-        window.navigationBarColor = Color.rgb(4, 7, 24)
+        window.statusBarColor = Color.rgb(6, 8, 25)
+        window.navigationBarColor = Color.rgb(6, 8, 25)
 
         mindView = MindBlowView(this)
         setContentView(mindView)
     }
 
-    @Suppress("DEPRECATION")
+    @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (!mindView.goBack()) {
             super.onBackPressed()
@@ -44,24 +38,24 @@ private enum class Screen {
     WELCOME,
     HOME,
     GAMES,
-    FOCUS,
-    COLOR,
-    MEMORY,
-    NUMBER,
-    CALM,
-    DAILY,
+    GAME,
     PROFILE
+}
+
+private enum class GameType {
+    NEURO_TAP,
+    COLOR_SHIFT,
+    REACTION_RUSH,
+    NUMBER_FLOW,
+    PATTERN_PULSE,
+    CALM_FLOW
 }
 
 private class MindBlowView(context: Context) : View(context) {
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
     private val prefs =
-        context.getSharedPreferences(
-            "mindblow_data",
-            Context.MODE_PRIVATE
-        )
+        context.getSharedPreferences("mindblow_data", Context.MODE_PRIVATE)
 
     private var screen =
         if (prefs.getBoolean("welcome_seen", false)) {
@@ -70,79 +64,84 @@ private class MindBlowView(context: Context) : View(context) {
             Screen.SPLASH
         }
 
-    private var startedAt = SystemClock.uptimeMillis()
+    private var selectedGame = GameType.NEURO_TAP
+
+    private var startedAt = System.currentTimeMillis()
     private var animation = 0f
 
     private var score = prefs.getInt("score", 0)
     private var streak = prefs.getInt("streak", 0)
 
-    private var toastText = ""
-    private var toastUntil = 0L
+    private var level: Int
+        get() = score / 500 + 1
+        set(value) {}
+
+    private var message = ""
+    private var messageUntil = 0L
 
     // ---------------------------------------------------------
-    // FOCUS ORB
+    // GAME STATE
     // ---------------------------------------------------------
 
-    private var focusScore = 0
-    private var focusRound = 0
-    private var focusX = 195f
-    private var focusY = 300f
-    private var focusRadius = 27f
-    private var focusEnd = 0L
-    private var focusStarted = false
+    private var gameStarted = false
+    private var gameOver = false
+    private var gameScore = 0
+    private var gameRound = 1
 
-    // ---------------------------------------------------------
-    // COLOR HUNT
-    // ---------------------------------------------------------
+    // Neuro Tap
+    private var neuroX = 0f
+    private var neuroY = 0f
+    private var neuroRadius = 34f
+    private var neuroExpires = 0L
+    private var neuroHits = 0
 
-    private var colorTarget = 0
-    private var colorLevel = 1
-    private var colorGrid = 4
-    private var colorRoundStarted = false
-    private var colorMessage = ""
+    // Color Shift
+    private var colorWord = ""
+    private var colorIndex = 0
+    private var colorOptions = intArrayOf(0, 1, 2, 3)
+    private var colorRunning = false
 
-    // ---------------------------------------------------------
-    // MEMORY MATCH
-    // ---------------------------------------------------------
-
-    private val memorySymbols = arrayOf(
-        "★", "◆", "●", "✦",
-        "☀", "☾", "✿", "❖"
+    private val colorNames = arrayOf(
+        "CYAN",
+        "PINK",
+        "YELLOW",
+        "GREEN"
     )
 
-    private var memoryCards = mutableListOf<Int>()
-    private var memoryOpen1 = -1
-    private var memoryOpen2 = -1
-    private var memoryMatched = BooleanArray(16)
-    private var memoryLocked = false
-    private var memoryMoves = 0
-    private var memoryPairs = 0
-    private var memoryStarted = false
-    private var memoryHideAt = 0L
+    private val gameColors = intArrayOf(
+        Color.rgb(65, 225, 255),
+        Color.rgb(255, 85, 180),
+        Color.rgb(255, 215, 70),
+        Color.rgb(80, 235, 145)
+    )
 
-    // ---------------------------------------------------------
-    // NUMBER FLOW
-    // ---------------------------------------------------------
+    // Reaction Rush
+    private var reactionState = 0
+    // 0 = idle, 1 = waiting, 2 = GO, 3 = result
+    private var reactionStarted = 0L
+    private var reactionDelay = 0L
+    private var reactionTime = 0L
+    private var reactionBest = Long.MAX_VALUE
 
-    private var numberSequence = mutableListOf<Int>()
+    // Number Flow
+    private var numberSequence = ""
     private var numberInput = ""
-    private var numberLevel = 1
     private var numberShowing = false
     private var numberShowUntil = 0L
-    private var numberRunning = false
 
-    // ---------------------------------------------------------
-    // CALM FLOW
-    // ---------------------------------------------------------
+    // Pattern Pulse
+    private var pattern = BooleanArray(9)
+    private var patternSelected = BooleanArray(9)
+    private var patternShowing = false
+    private var patternShowUntil = 0L
 
-    private var calmRunning = false
-    private var calmStart = 0L
-    private var calmSeconds = 0
-    private var calmPhase = "READY"
+    // Calm Flow
+    private var calmCycles = 0
+    private var calmPhase = 0
+    private var calmPhaseStarted = 0L
 
     init {
         isFocusable = true
-        setLayerType(View.LAYER_TYPE_HARDWARE, null)
         postInvalidateDelayed(16L)
     }
 
@@ -158,126 +157,102 @@ private class MindBlowView(context: Context) : View(context) {
 
         animation += 0.018f
 
-        drawBackground(canvas, w, h)
+        drawAnimatedBackground(canvas, w, h)
 
         when (screen) {
             Screen.SPLASH -> drawSplash(canvas, w, h)
             Screen.WELCOME -> drawWelcome(canvas, w, h)
             Screen.HOME -> drawHome(canvas, w, h)
             Screen.GAMES -> drawGames(canvas, w, h)
-            Screen.FOCUS -> drawFocus(canvas, w, h)
-            Screen.COLOR -> drawColorHunt(canvas, w, h)
-            Screen.MEMORY -> drawMemory(canvas, w, h)
-            Screen.NUMBER -> drawNumberFlow(canvas, w, h)
-            Screen.CALM -> drawCalm(canvas, w, h)
-            Screen.DAILY -> drawDaily(canvas, w, h)
+            Screen.GAME -> drawGame(canvas, w, h)
             Screen.PROFILE -> drawProfile(canvas, w, h)
         }
 
-        if (toastUntil > SystemClock.uptimeMillis()) {
+        if (messageUntil > System.currentTimeMillis()) {
             drawToast(canvas, w, h)
         }
 
         if (
             screen == Screen.SPLASH &&
-            SystemClock.uptimeMillis() - startedAt > 1400L
+            System.currentTimeMillis() - startedAt > 1300L
         ) {
             screen = Screen.WELCOME
         }
 
         updateGames()
 
-        invalidate()
         postInvalidateDelayed(16L)
     }
 
     // =========================================================
-    // BACKGROUND
+    // ANIMATED BACKGROUND
     // =========================================================
 
-    private fun drawBackground(
+    private fun drawAnimatedBackground(
         canvas: Canvas,
         w: Float,
         h: Float
     ) {
-
         paint.shader = LinearGradient(
             0f,
             0f,
             w,
             h,
-            Color.rgb(3, 6, 25),
-            Color.rgb(29, 8, 57),
+            Color.rgb(4, 7, 26),
+            Color.rgb(27, 5, 50),
             Shader.TileMode.CLAMP
         )
 
-        canvas.drawRect(
-            0f,
-            0f,
-            w,
-            h,
-            paint
-        )
+        canvas.drawRect(0f, 0f, w, h, paint)
 
         paint.shader = null
 
         val t = animation
 
-        // Large moving glow
-        paint.color = Color.argb(30, 25, 225, 255)
+        // Moving cyan glow
+        paint.color = Color.argb(38, 20, 220, 255)
 
         canvas.drawCircle(
-            w * 0.15f + sin(t) * 45f,
-            h * 0.18f + cos(t * 1.2f) * 35f,
-            150f,
+            w * 0.15f + sin(t * 0.7f) * w * 0.10f,
+            h * 0.20f + cos(t * 0.6f) * 40f,
+            min(w * 0.28f, 145f),
             paint
         )
 
-        paint.color = Color.argb(28, 145, 70, 255)
+        // Moving purple glow
+        paint.color = Color.argb(34, 155, 65, 255)
 
         canvas.drawCircle(
-            w * 0.85f + cos(t * 0.7f) * 50f,
-            h * 0.35f + sin(t) * 40f,
-            175f,
+            w * 0.88f + cos(t * 0.5f) * 45f,
+            h * 0.40f + sin(t * 0.8f) * 55f,
+            min(w * 0.30f, 165f),
             paint
         )
 
-        paint.color = Color.argb(20, 20, 255, 180)
+        // Bottom glow
+        paint.color = Color.argb(28, 30, 255, 175)
 
         canvas.drawCircle(
-            w * 0.50f + sin(t * 0.5f) * 55f,
-            h * 0.82f,
-            190f,
+            w * 0.50f + sin(t * 0.4f) * 55f,
+            h * 0.86f,
+            min(w * 0.32f, 180f),
             paint
         )
-
-        // Orbit lines
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 1f
-        paint.color = Color.argb(22, 110, 220, 255)
-
-        for (i in 0 until 7) {
-            canvas.drawCircle(
-                w / 2f,
-                h * 0.44f,
-                80f + i * 48f + sin(t + i) * 6f,
-                paint
-            )
-        }
-
-        paint.style = Paint.Style.FILL
 
         // Floating particles
         for (i in 0 until 22) {
             val px =
-                ((i * 79f + animation * (12f + i)) % (w + 40f)) - 20f
+                ((i * 83f + sin(t * 0.4f + i) * 35f) % w + w) % w
 
             val py =
-                ((i * 127f + sin(animation + i) * 25f) % (h + 40f)) - 20f
+                ((i * 137f + cos(t * 0.3f + i) * 45f) % h + h) % h
+
+            val alpha =
+                (20 + 18 * ((sin(t + i) + 1f) / 2f)).toInt()
 
             paint.color = Color.argb(
-                55,
-                120,
+                alpha,
+                100,
                 220,
                 255
             )
@@ -289,6 +264,28 @@ private class MindBlowView(context: Context) : View(context) {
                 paint
             )
         }
+
+        // Radar rings
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1f
+        paint.color = Color.argb(22, 110, 210, 255)
+
+        val centerX = w / 2f
+        val centerY = h * 0.53f
+
+        for (i in 0 until 7) {
+            val radius =
+                45f + i * 48f + sin(t + i) * 4f
+
+            canvas.drawCircle(
+                centerX,
+                centerY,
+                radius,
+                paint
+            )
+        }
+
+        paint.style = Paint.Style.FILL
     }
 
     // =========================================================
@@ -305,12 +302,10 @@ private class MindBlowView(context: Context) : View(context) {
         bold: Boolean = false,
         align: Paint.Align = Paint.Align.LEFT
     ) {
-
         paint.shader = null
         paint.color = color
         paint.textSize = size
         paint.textAlign = align
-
         paint.typeface = Typeface.create(
             "sans-serif",
             if (bold) Typeface.BOLD else Typeface.NORMAL
@@ -336,13 +331,13 @@ private class MindBlowView(context: Context) : View(context) {
         b: Float,
         radius: Float = 20f
     ) {
-
         paint.shader = null
+
         paint.color = Color.argb(
-            225,
-            12,
-            18,
-            44
+            228,
+            10,
+            17,
+            43
         )
 
         canvas.drawRoundRect(
@@ -356,11 +351,12 @@ private class MindBlowView(context: Context) : View(context) {
         )
 
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 1.1f
+        paint.strokeWidth = 1.2f
+
         paint.color = Color.argb(
-            65,
-            100,
-            190,
+            70,
+            80,
+            180,
             255
         )
 
@@ -378,7 +374,7 @@ private class MindBlowView(context: Context) : View(context) {
     }
 
     // =========================================================
-    // BUTTON
+    // GRADIENT BUTTON
     // =========================================================
 
     private fun button(
@@ -389,14 +385,13 @@ private class MindBlowView(context: Context) : View(context) {
         r: Float,
         b: Float
     ) {
-
         paint.shader = LinearGradient(
             l,
             t,
             r,
             b,
-            Color.rgb(15, 215, 255),
-            Color.rgb(130, 65, 255),
+            Color.rgb(30, 220, 255),
+            Color.rgb(125, 65, 255),
             Shader.TileMode.CLAMP
         )
 
@@ -433,20 +428,21 @@ private class MindBlowView(context: Context) : View(context) {
         title: String,
         subtitle: String
     ) {
-
         text(
             canvas,
             "‹",
             22f,
-            49f,
-            38f
+            47f,
+            38f,
+            Color.WHITE,
+            false
         )
 
         text(
             canvas,
             title,
             58f,
-            40f,
+            39f,
             23f,
             Color.WHITE,
             true
@@ -456,14 +452,14 @@ private class MindBlowView(context: Context) : View(context) {
             canvas,
             subtitle,
             58f,
-            62f,
+            59f,
             11f,
-            0xff9ca9d0.toInt()
+            0xff9ca9d2.toInt()
         )
     }
 
     // =========================================================
-    // NAVIGATION
+    // BOTTOM NAVIGATION
     // =========================================================
 
     private fun navigation(
@@ -472,8 +468,7 @@ private class MindBlowView(context: Context) : View(context) {
         h: Float,
         selected: Int
     ) {
-
-        val top = h - 80f
+        val top = h - 76f
 
         card(
             canvas,
@@ -481,7 +476,15 @@ private class MindBlowView(context: Context) : View(context) {
             top,
             w - 10f,
             h - 8f,
-            23f
+            22f
+        )
+
+        val names = arrayOf(
+            "Home",
+            "Games",
+            "Focus",
+            "Daily",
+            "Profile"
         )
 
         val icons = arrayOf(
@@ -492,44 +495,34 @@ private class MindBlowView(context: Context) : View(context) {
             "●"
         )
 
-        val labels = arrayOf(
-            "Home",
-            "Games",
-            "Focus",
-            "Daily",
-            "Profile"
-        )
-
         for (i in 0..4) {
+            val x = w * (i + 0.5f) / 5f
 
-            val x =
-                w * (i + 0.5f) / 5f
-
-            val color =
+            val c =
                 if (i == selected) {
-                    0xff55e7ff.toInt()
+                    0xff5ce9ff.toInt()
                 } else {
-                    0xff7582a8.toInt()
+                    0xff7784aa.toInt()
                 }
 
             text(
                 canvas,
                 icons[i],
                 x,
-                top + 29f,
+                top + 27f,
                 19f,
-                color,
+                c,
                 true,
                 Paint.Align.CENTER
             )
 
             text(
                 canvas,
-                labels[i],
+                names[i],
                 x,
-                top + 50f,
-                9f,
-                color,
+                top + 48f,
+                8.5f,
+                c,
                 false,
                 Paint.Align.CENTER
             )
@@ -545,27 +538,26 @@ private class MindBlowView(context: Context) : View(context) {
         w: Float,
         h: Float
     ) {
-
         val pulse =
             1f + sin(animation * 2f) * 0.08f
 
         text(
             canvas,
-            "✦",
+            "M",
             w / 2f,
-            h * 0.40f,
+            h * 0.43f,
             80f * pulse,
-            0xff5fe9ff.toInt(),
+            0xff61e9ff.toInt(),
             true,
             Paint.Align.CENTER
         )
 
         text(
             canvas,
-            "MindBlow",
+            "MINDBLOW",
             w / 2f,
-            h * 0.50f,
-            42f,
+            h * 0.52f,
+            34f,
             Color.WHITE,
             true,
             Paint.Align.CENTER
@@ -573,12 +565,12 @@ private class MindBlowView(context: Context) : View(context) {
 
         text(
             canvas,
-            "RESET • PLAY • REFRESH",
+            "RESET YOUR MIND",
             w / 2f,
-            h * 0.55f,
+            h * 0.565f,
             12f,
-            0xffaebbe1.toInt(),
-            false,
+            0xffaab8df.toInt(),
+            true,
             Paint.Align.CENTER
         )
     }
@@ -592,13 +584,65 @@ private class MindBlowView(context: Context) : View(context) {
         w: Float,
         h: Float
     ) {
+        text(
+            canvas,
+            "Welcome to",
+            w / 2f,
+            h * 0.15f,
+            15f,
+            0xffaab7dc.toInt(),
+            false,
+            Paint.Align.CENTER
+        )
 
         text(
             canvas,
             "MindBlow",
             w / 2f,
-            72f,
-            32f,
+            h * 0.21f,
+            38f,
+            Color.WHITE,
+            true,
+            Paint.Align.CENTER
+        )
+
+        // Animated orb
+        val cx = w / 2f
+        val cy = h * 0.42f
+
+        for (i in 0 until 5) {
+            paint.color = Color.argb(
+                24 - i * 3,
+                60,
+                220,
+                255
+            )
+
+            canvas.drawCircle(
+                cx,
+                cy,
+                45f + i * 30f + sin(animation + i) * 7f,
+                paint
+            )
+        }
+
+        text(
+            canvas,
+            "BRAIN",
+            cx,
+            cy - 5f,
+            16f,
+            0xff5ee9ff.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
+
+        text(
+            canvas,
+            "PLAY",
+            cx,
+            cy + 25f,
+            27f,
             Color.WHITE,
             true,
             Paint.Align.CENTER
@@ -606,58 +650,33 @@ private class MindBlowView(context: Context) : View(context) {
 
         text(
             canvas,
-            "Your tiny digital brain break.",
+            "Short games for focus, memory, reaction",
             w / 2f,
-            101f,
+            h * 0.59f,
             14f,
-            0xffaab7d9.toInt(),
+            0xffaab6d8.toInt(),
             false,
             Paint.Align.CENTER
         )
 
-        val pulse =
-            1f + sin(animation * 2f) * 0.08f
-
         text(
             canvas,
-            "✦",
+            "and a calmer mind.",
             w / 2f,
-            h * 0.44f,
-            92f * pulse,
-            0xff5de8ff.toInt(),
-            true,
-            Paint.Align.CENTER
-        )
-
-        text(
-            canvas,
-            "PLAY • FOCUS • RELAX",
-            w / 2f,
-            h * 0.59f,
-            23f,
-            Color.WHITE,
-            true,
-            Paint.Align.CENTER
-        )
-
-        text(
-            canvas,
-            "Short games made for a quick mental reset.",
-            w / 2f,
-            h * 0.65f,
-            13f,
-            0xffaeb9d9.toInt(),
+            h * 0.625f,
+            14f,
+            0xffaab6d8.toInt(),
             false,
             Paint.Align.CENTER
         )
 
         button(
             canvas,
-            "START MY JOURNEY",
+            "START MY RESET",
             w * 0.12f,
-            h * 0.76f,
+            h * 0.72f,
             w * 0.88f,
-            h * 0.84f
+            h * 0.80f
         )
     }
 
@@ -670,70 +689,73 @@ private class MindBlowView(context: Context) : View(context) {
         w: Float,
         h: Float
     ) {
-
         text(
             canvas,
-            "MindBlow",
+            "MINDBLOW",
             20f,
-            39f,
-            28f,
+            42f,
+            25f,
             Color.WHITE,
             true
         )
 
         text(
             canvas,
-            "Level ${score / 250 + 1}  •  Mind reset zone",
+            "Your daily mental reset",
             20f,
-            61f,
+            63f,
             11f,
-            0xff9ba8cf.toInt()
+            0xff98a7d0.toInt()
         )
 
         card(
             canvas,
-            w - 116f,
-            17f,
+            w - 108f,
+            18f,
             w - 18f,
-            57f,
-            16f
+            61f,
+            17f
         )
 
         text(
             canvas,
-            "✦ $score",
-            w - 67f,
-            42f,
-            14f,
+            "$score XP",
+            w - 63f,
+            45f,
+            13f,
             0xffffd66b.toInt(),
             true,
             Paint.Align.CENTER
         )
 
+        // Hero card
+        val heroTop = h * 0.105f
+        val heroBottom = h * 0.275f
+
         card(
             canvas,
-            18f,
-            80f,
-            w - 18f,
-            184f,
-            23f
+            16f,
+            heroTop,
+            w - 16f,
+            heroBottom,
+            24f
         )
 
         text(
             canvas,
-            "READY FOR A RESET?",
-            34f,
-            111f,
+            "LEVEL $level",
+            31f,
+            heroTop + 34f,
             11f,
-            0xff5ce8ff.toInt(),
+            0xff5de7ff.toInt(),
             true
         )
 
         text(
             canvas,
-            "Pick a challenge.",
-            34f,
-            143f,
+            "Ready for a quick reset?",
+            31f,
+            heroTop + 65f,
             22f,
             Color.WHITE,
             true
@@ -741,74 +763,153 @@ private class MindBlowView(context: Context) : View(context) {
 
         text(
             canvas,
-            "A few minutes can refresh your attention.",
-            34f,
-            165f,
-            11f,
-            0xffa8b5d8.toInt()
+            "Play for 2–5 minutes.",
+            31f,
+            heroTop + 89f,
+            12f,
+            0xffaab6d8.toInt()
         )
 
-        button(
-            canvas,
-            "DAILY RESET  ›",
-            34f,
-            178f,
-            w - 34f,
-            218f
+        val progress =
+            (score % 500) / 500f
+
+        paint.color = Color.argb(
+            55,
+            100,
+            130,
+            180
         )
 
+        canvas.drawRoundRect(
+            31f,
+            heroBottom - 27f,
+            w - 31f,
+            heroBottom - 20f,
+            5f,
+            5f,
+            paint
+        )
+
+        paint.shader = LinearGradient(
+            31f,
+            0f,
+            w - 31f,
+            0f,
+            0xff43e5ff.toInt(),
+            0xff965bff.toInt(),
+            Shader.TileMode.CLAMP
+        )
+
+        canvas.drawRoundRect(
+            31f,
+            heroBottom - 27f,
+            31f + (w - 62f) * progress,
+            heroBottom - 20f,
+            5f,
+            5f,
+            paint
+        )
+
+        paint.shader = null
+
+        // Quick play
         text(
             canvas,
-            "Mind games",
-            20f,
-            250f,
-            19f,
+            "QUICK PLAY",
+            18f,
+            heroBottom + 43f,
+            17f,
             Color.WHITE,
             true
         )
 
-        gameCard(
+        val gap = 10f
+        val cardW = (w - 36f - gap) / 2f
+        val row1 = heroBottom + 58f
+        val row2 = row1 + 102f
+
+        miniGameCard(
             canvas,
-            "◎",
-            "Focus Orb",
-            "Tap the moving glow",
+            "NEURO",
+            "Fast targets",
             18f,
-            266f,
-            w / 2f - 8f,
-            355f
+            row1,
+            18f + cardW,
+            row1 + 92f,
+            0xff4de7ff.toInt()
         )
 
-        gameCard(
+        miniGameCard(
             canvas,
-            "◆",
-            "Color Hunt",
-            "Find the odd tile",
-            w / 2f + 8f,
-            266f,
+            "COLOR",
+            "Train attention",
+            28f + cardW,
+            row1,
             w - 18f,
-            355f
+            row1 + 92f,
+            0xffff5ab7.toInt()
         )
 
-        gameCard(
+        miniGameCard(
             canvas,
-            "✦",
-            "Memory",
-            "Match the pairs",
+            "REACTION",
+            "Test reflexes",
             18f,
-            365f,
-            w / 2f - 8f,
-            454f
+            row2,
+            18f + cardW,
+            row2 + 92f,
+            0xffffd84d.toInt()
         )
 
-        gameCard(
+        miniGameCard(
             canvas,
-            "123",
-            "Number Flow",
-            "Remember numbers",
-            w / 2f + 8f,
-            365f,
+            "MEMORY",
+            "Remember patterns",
+            28f + cardW,
+            row2,
             w - 18f,
-            454f
+            row2 + 92f,
+            0xff8f7cff.toInt()
+        )
+
+        val lower = row2 + 108f
+
+        card(
+            canvas,
+            18f,
+            lower,
+            w - 18f,
+            lower + 72f,
+            19f
+        )
+
+        text(
+            canvas,
+            "🔥",
+            40f,
+            lower + 43f,
+            22f,
+            Color.WHITE,
+            true
+        )
+
+        text(
+            canvas,
+            "$streak DAY STREAK",
+            76f,
+            lower + 31f,
+            13f,
+            0xffffc64d.toInt(),
+            true
+        )
+
+        text(
+            canvas,
+            "Keep your reset going",
+            76f,
+            lower + 51f,
+            11f,
+            0xff9da9ce.toInt()
         )
 
         navigation(
@@ -819,37 +920,39 @@ private class MindBlowView(context: Context) : View(context) {
         )
     }
 
-    // =========================================================
-    // GAME CARD
-    // =========================================================
-
-    private fun gameCard(
+    private fun miniGameCard(
         canvas: Canvas,
-        icon: String,
         title: String,
         subtitle: String,
         l: Float,
         t: Float,
         r: Float,
-        b: Float
+        b: Float,
+        accent: Int
     ) {
+        card(canvas, l, t, r, b, 19f)
 
-        card(
-            canvas,
-            l,
-            t,
-            r,
-            b,
-            19f
+        paint.color = Color.argb(
+            45,
+            Color.red(accent),
+            Color.green(accent),
+            Color.blue(accent)
+        )
+
+        canvas.drawCircle(
+            l + 27f,
+            t + 30f,
+            13f,
+            paint
         )
 
         text(
             canvas,
-            icon,
-            l + 34f,
-            t + 40f,
-            if (icon == "123") 17f else 23f,
-            0xff61e6ff.toInt(),
+            "●",
+            l + 27f,
+            t + 35f,
+            12f,
+            accent,
             true,
             Paint.Align.CENTER
         )
@@ -858,8 +961,8 @@ private class MindBlowView(context: Context) : View(context) {
             canvas,
             title,
             l + 18f,
-            t + 67f,
-            15f,
+            t + 62f,
+            14f,
             Color.WHITE,
             true
         )
@@ -868,14 +971,14 @@ private class MindBlowView(context: Context) : View(context) {
             canvas,
             subtitle,
             l + 18f,
-            t + 84f,
-            9.5f,
+            t + 80f,
+            9f,
             0xff98a6cc.toInt()
         )
     }
 
     // =========================================================
-    // GAMES
+    // GAMES MENU
     // =========================================================
 
     private fun drawGames(
@@ -883,82 +986,102 @@ private class MindBlowView(context: Context) : View(context) {
         w: Float,
         h: Float
     ) {
-
         header(
             canvas,
             "Mind Games",
-            "Choose your mental reset"
+            "Choose your challenge"
         )
 
-        gameCard(
+        val top = 82f
+        val gap = 10f
+        val cw = (w - 36f - gap) / 2f
+
+        gameMenuCard(
             canvas,
-            "◎",
-            "Focus Orb",
-            "Reaction & focus",
+            "01",
+            "Neuro Tap",
+            "Train reaction",
             18f,
-            92f,
-            w / 2f - 8f,
-            195f
+            top,
+            18f + cw,
+            top + 105f,
+            0xff4de7ff.toInt()
         )
 
-        gameCard(
+        gameMenuCard(
             canvas,
-            "◆",
-            "Color Hunt",
-            "Visual attention",
-            w / 2f + 8f,
-            92f,
+            "02",
+            "Color Shift",
+            "Train attention",
+            28f + cw,
+            top,
             w - 18f,
-            195f
+            top + 105f,
+            0xffff5ab7.toInt()
         )
 
-        gameCard(
+        gameMenuCard(
             canvas,
-            "✦",
-            "Memory Match",
-            "Memory training",
+            "03",
+            "Reaction Rush",
+            "Test reflex",
             18f,
-            207f,
-            w / 2f - 8f,
-            310f
+            top + 115f,
+            18f + cw,
+            top + 220f,
+            0xffffd84d.toInt()
         )
 
-        gameCard(
+        gameMenuCard(
             canvas,
-            "123",
+            "04",
             "Number Flow",
-            "Working memory",
-            w / 2f + 8f,
-            207f,
+            "Train memory",
+            28f + cw,
+            top + 115f,
             w - 18f,
-            310f
+            top + 220f,
+            0xff7c8cff.toInt()
         )
 
-        gameCard(
+        gameMenuCard(
             canvas,
-            "◌",
-            "Calm Flow",
-            "Breathing reset",
+            "05",
+            "Pattern Pulse",
+            "Visual memory",
             18f,
-            322f,
+            top + 230f,
+            18f + cw,
+            top + 335f,
+            0xffa568ff.toInt()
+        )
+
+        gameMenuCard(
+            canvas,
+            "06",
+            "Calm Flow",
+            "Reset your pace",
+            28f + cw,
+            top + 230f,
             w - 18f,
-            425f
+            top + 335f,
+            0xff55e5a2.toInt()
         )
 
         card(
             canvas,
             18f,
-            438f,
+            top + 355f,
             w - 18f,
-            505f,
-            18f
+            top + 425f,
+            20f
         )
 
         text(
             canvas,
             "TIP",
             34f,
-            466f,
+            top + 383f,
             10f,
             0xff5ce7ff.toInt(),
             true
@@ -966,11 +1089,11 @@ private class MindBlowView(context: Context) : View(context) {
 
         text(
             canvas,
-            "Try 2–3 minutes between study sessions.",
+            "Short sessions work best. Pick one game and reset.",
             34f,
-            489f,
-            12f,
-            0xffaab7d8.toInt()
+            top + 407f,
+            11f,
+            0xffaab6d8.toInt()
         )
 
         navigation(
@@ -981,36 +1104,49 @@ private class MindBlowView(context: Context) : View(context) {
         )
     }
 
-    // =========================================================
-    // FOCUS ORB
-    // =========================================================
-
-    private fun drawFocus(
+    private fun gameMenuCard(
         canvas: Canvas,
-        w: Float,
-        h: Float
+        number: String,
+        title: String,
+        subtitle: String,
+        l: Float,
+        t: Float,
+        r: Float,
+        b: Float,
+        accent: Int
     ) {
+        card(canvas, l, t, r, b, 19f)
 
-        header(
-            canvas,
-            "Focus Orb",
-            "Tap the moving light"
+        paint.color = Color.argb(
+            45,
+            Color.red(accent),
+            Color.green(accent),
+            Color.blue(accent)
         )
 
-        card(
-            canvas,
-            18f,
-            82f,
-            w - 18f,
-            136f,
-            17f
+        canvas.drawCircle(
+            l + 28f,
+            t + 30f,
+            17f,
+            paint
         )
 
         text(
             canvas,
-            "SCORE  $focusScore",
-            34f,
-            110f,
+            number,
+            l + 28f,
+            t + 34f,
+            9f,
+            accent,
+            true,
+            Paint.Align.CENTER
+        )
+
+        text(
+            canvas,
+            title,
+            l + 18f,
+            t + 66f,
             14f,
             Color.WHITE,
             true
@@ -1018,454 +1154,431 @@ private class MindBlowView(context: Context) : View(context) {
 
         text(
             canvas,
-            "ROUND  $focusRound",
-            w - 34f,
-            110f,
-            12f,
-            0xff91a0c9.toInt(),
-            true,
-            Paint.Align.RIGHT
+            subtitle,
+            l + 18f,
+            t + 85f,
+            9f,
+            0xff9da9cf.toInt()
+        )
+    }
+
+    // =========================================================
+    // GAME SCREEN
+    // =========================================================
+
+    private fun drawGame(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        when (selectedGame) {
+            GameType.NEURO_TAP ->
+                drawNeuroTap(canvas, w, h)
+
+            GameType.COLOR_SHIFT ->
+                drawColorShift(canvas, w, h)
+
+            GameType.REACTION_RUSH ->
+                drawReactionRush(canvas, w, h)
+
+            GameType.NUMBER_FLOW ->
+                drawNumberFlow(canvas, w, h)
+
+            GameType.PATTERN_PULSE ->
+                drawPatternPulse(canvas, w, h)
+
+            GameType.CALM_FLOW ->
+                drawCalmFlow(canvas, w, h)
+        }
+    }
+
+    // =========================================================
+    // 1. NEURO TAP
+    // =========================================================
+
+    private fun drawNeuroTap(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        gameHeader(
+            canvas,
+            "NEURO TAP",
+            "Hit the glowing target"
         )
 
-        if (!focusStarted) {
+        drawGameStats(
+            canvas,
+            w,
+            "SCORE $gameScore",
+            "ROUND $gameRound"
+        )
 
-            text(
+        if (!gameStarted) {
+            gameIntro(
                 canvas,
-                "READY?",
-                w / 2f,
-                255f,
-                32f,
-                Color.WHITE,
-                true,
-                Paint.Align.CENTER
+                w,
+                h,
+                "NEURO TAP",
+                "Targets appear in different places.",
+                "Tap them before they vanish.",
+                "START GAME"
             )
+            return
+        }
 
-            text(
+        if (gameOver) {
+            gameResult(
                 canvas,
-                "Tap START, then hit the glowing orb.",
-                w / 2f,
-                287f,
-                13f,
-                0xffaab7d9.toInt(),
-                false,
-                Paint.Align.CENTER
+                w,
+                h,
+                "SESSION COMPLETE",
+                "$gameScore TARGETS",
+                "XP EARNED  +${gameScore * 8}",
+                "PLAY AGAIN"
             )
+            return
+        }
 
-            button(
-                canvas,
-                "START FOCUS",
-                w * 0.20f,
-                330f,
-                w * 0.80f,
-                382f
-            )
+        val now = System.currentTimeMillis()
 
-        } else {
+        if (now > neuroExpires) {
+            gameOver = true
+            saveScore(gameScore * 8)
+            return
+        }
 
-            val remaining =
-                maxOf(
-                    0L,
-                    focusEnd - SystemClock.uptimeMillis()
-                )
-
-            text(
-                canvas,
-                "${remaining / 1000}.${(remaining % 1000) / 100}s",
-                w / 2f,
-                170f,
-                18f,
-                0xffaebce2.toInt(),
-                true,
-                Paint.Align.CENTER
-            )
-
-            val pulse =
-                1f + sin(animation * 4f) * 0.12f
-
+        // target glow
+        for (i in 3 downTo 1) {
             paint.color = Color.argb(
-                30,
+                18,
                 70,
-                225,
+                230,
                 255
             )
 
             canvas.drawCircle(
-                focusX,
-                focusY,
-                60f * pulse,
+                neuroX,
+                neuroY,
+                neuroRadius + i * 15f +
+                    sin(animation * 4f) * 4f,
                 paint
-            )
-
-            paint.color = 0xff51e8ff.toInt()
-
-            canvas.drawCircle(
-                focusX,
-                focusY,
-                focusRadius,
-                paint
-            )
-
-            paint.color = Color.WHITE
-
-            canvas.drawCircle(
-                focusX - 7f,
-                focusY - 7f,
-                5f,
-                paint
-            )
-
-            text(
-                canvas,
-                "TAP!",
-                w / 2f,
-                470f,
-                20f,
-                Color.WHITE,
-                true,
-                Paint.Align.CENTER
             )
         }
 
-        navigation(
+        paint.color = 0xff53eaff.toInt()
+
+        canvas.drawCircle(
+            neuroX,
+            neuroY,
+            neuroRadius,
+            paint
+        )
+
+        paint.color = Color.WHITE
+
+        canvas.drawCircle(
+            neuroX,
+            neuroY,
+            7f,
+            paint
+        )
+
+        text(
+            canvas,
+            "TAP!",
+            neuroX,
+            neuroY + 5f,
+            10f,
+            0xff04101e.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
+
+        text(
+            canvas,
+            "Find the glow",
+            w / 2f,
+            h * 0.83f,
+            14f,
+            0xffaab8dc.toInt(),
+            false,
+            Paint.Align.CENTER
+        )
+    }
+
+    // =========================================================
+    // 2. COLOR SHIFT
+    // =========================================================
+
+    private fun drawColorShift(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        gameHeader(
+            canvas,
+            "COLOR SHIFT",
+            "Tap the color, not the word"
+        )
+
+        drawGameStats(
             canvas,
             w,
-            h,
-            2
-        )
-    }
-
-    // =========================================================
-    // COLOR HUNT
-    // =========================================================
-
-    private fun drawColorHunt(
-        canvas: Canvas,
-        w: Float,
-        h: Float
-    ) {
-
-        header(
-            canvas,
-            "Color Hunt",
-            "Find the different tile"
+            "SCORE $gameScore",
+            "ROUND $gameRound"
         )
 
-        text(
-            canvas,
-            "LEVEL $colorLevel",
-            20f,
-            94f,
-            14f,
-            0xff62e7ff.toInt(),
-            true
-        )
-
-        text(
-            canvas,
-            colorMessage,
-            w - 20f,
-            94f,
-            12f,
-            0xffa9b7da.toInt(),
-            false,
-            Paint.Align.RIGHT
-        )
-
-        val gridSize =
-            if (colorGrid < 5) 4 else 5
-
-        val boardSize =
-            min(w - 40f, 330f)
-
-        val left =
-            (w - boardSize) / 2f
-
-        val top = 125f
-
-        val cell =
-            boardSize / gridSize.toFloat()
-
-        val base = Color.rgb(
-            45,
-            160,
-            230
-        )
-
-        val odd = Color.rgb(
-            80,
-            195,
-            240
-        )
-
-        for (i in 0 until gridSize * gridSize) {
-
-            val row =
-                i / gridSize
-
-            val col =
-                i % gridSize
-
-            val l =
-                left + col * cell + 4f
-
-            val tt =
-                top + row * cell + 4f
-
-            val r =
-                left + (col + 1) * cell - 4f
-
-            val b =
-                top + (row + 1) * cell - 4f
-
-            paint.color =
-                if (i == colorTarget) odd else base
-
-            canvas.drawRoundRect(
-                l,
-                tt,
-                r,
-                b,
-                15f,
-                15f,
-                paint
-            )
-        }
-
-        text(
-            canvas,
-            "One tile is slightly different.",
-            w / 2f,
-            top + boardSize + 32f,
-            14f,
-            0xffb0bddf.toInt(),
-            false,
-            Paint.Align.CENTER
-        )
-
-        text(
-            canvas,
-            "Trust your eyes.",
-            w / 2f,
-            top + boardSize + 56f,
-            11f,
-            0xff7e8caf.toInt(),
-            false,
-            Paint.Align.CENTER
-        )
-    }
-
-    // =========================================================
-    // MEMORY
-    // =========================================================
-
-    private fun drawMemory(
-        canvas: Canvas,
-        w: Float,
-        h: Float
-    ) {
-
-        header(
-            canvas,
-            "Memory Match",
-            "Match every pair"
-        )
-
-        text(
-            canvas,
-            "PAIRS  $memoryPairs / 8",
-            20f,
-            94f,
-            13f,
-            0xff61e7ff.toInt(),
-            true
-        )
-
-        text(
-            canvas,
-            "MOVES  $memoryMoves",
-            w - 20f,
-            94f,
-            12f,
-            0xffa3b1d3.toInt(),
-            true,
-            Paint.Align.RIGHT
-        )
-
-        if (!memoryStarted) {
-
-            text(
+        if (!colorRunning) {
+            gameIntro(
                 canvas,
-                "Ready?",
-                w / 2f,
-                245f,
-                32f,
-                Color.WHITE,
-                true,
-                Paint.Align.CENTER
+                w,
+                h,
+                "COLOR SHIFT",
+                "The word and its color can disagree.",
+                "Choose the actual color of the text.",
+                "START GAME"
             )
-
-            text(
-                canvas,
-                "Find all 8 matching pairs.",
-                w / 2f,
-                278f,
-                13f,
-                0xffaab7d9.toInt(),
-                false,
-                Paint.Align.CENTER
-            )
-
-            button(
-                canvas,
-                "START MEMORY",
-                w * 0.20f,
-                320f,
-                w * 0.80f,
-                372f
-            )
-
             return
         }
 
-        val board =
-            min(w - 38f, 350f)
+        text(
+            canvas,
+            "WHAT COLOR IS THIS?",
+            w / 2f,
+            h * 0.25f,
+            12f,
+            0xffa7b5d9.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
 
-        val left =
-            (w - board) / 2f
+        text(
+            canvas,
+            colorWord,
+            w / 2f,
+            h * 0.39f,
+            42f,
+            gameColors[colorIndex],
+            true,
+            Paint.Align.CENTER
+        )
 
-        val top = 112f
-        val cell = board / 4f
+        val bw = (w - 52f) / 2f
+        val startY = h * 0.52f
 
-        for (i in 0 until 16) {
+        for (i in 0 until 4) {
+            val row = i / 2
+            val col = i % 2
 
-            val row =
-                i / 4
+            val l = 18f + col * (bw + 16f)
+            val t = startY + row * 75f
+            val r = l + bw
+            val b = t + 58f
 
-            val col =
-                i % 4
+            paint.color = Color.argb(
+                40,
+                Color.red(gameColors[colorOptions[i]]),
+                Color.green(gameColors[colorOptions[i]]),
+                Color.blue(gameColors[colorOptions[i]])
+            )
 
-            val l =
-                left + col * cell + 4f
+            canvas.drawRoundRect(
+                l,
+                t,
+                r,
+                b,
+                17f,
+                17f,
+                paint
+            )
 
-            val tt =
-                top + row * cell + 4f
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 1.5f
+            paint.color = gameColors[colorOptions[i]]
 
-            val r =
-                left + (col + 1) * cell - 4f
+            canvas.drawRoundRect(
+                l,
+                t,
+                r,
+                b,
+                17f,
+                17f,
+                paint
+            )
 
-            val b =
-                top + (row + 1) * cell - 4f
+            paint.style = Paint.Style.FILL
 
-            val open =
-                memoryMatched[i] ||
-                        i == memoryOpen1 ||
-                        i == memoryOpen2
+            text(
+                canvas,
+                colorNames[colorOptions[i]],
+                (l + r) / 2f,
+                t + 36f,
+                13f,
+                Color.WHITE,
+                true,
+                Paint.Align.CENTER
+            )
+        }
+    }
 
-            if (open) {
+    // =========================================================
+    // 3. REACTION RUSH
+    // =========================================================
 
-                paint.color =
-                    Color.argb(
-                        235,
-                        18,
-                        55,
-                        82
+    private fun drawReactionRush(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        gameHeader(
+            canvas,
+            "REACTION RUSH",
+            "Wait for green"
+        )
+
+        if (reactionState == 0) {
+            gameIntro(
+                canvas,
+                w,
+                h,
+                "REACTION RUSH",
+                "The screen changes unexpectedly.",
+                "Tap only when it turns green.",
+                "START"
+            )
+            return
+        }
+
+        val cx = w / 2f
+        val cy = h * 0.43f
+
+        when (reactionState) {
+            1 -> {
+                for (i in 0..3) {
+                    paint.color = Color.argb(
+                        20 - i * 3,
+                        255,
+                        100,
+                        80
                     )
 
-                canvas.drawRoundRect(
-                    l,
-                    tt,
-                    r,
-                    b,
-                    13f,
-                    13f,
+                    canvas.drawCircle(
+                        cx,
+                        cy,
+                        80f + i * 35f,
+                        paint
+                    )
+                }
+
+                paint.color = 0xffff5c69.toInt()
+
+                canvas.drawCircle(
+                    cx,
+                    cy,
+                    75f,
                     paint
                 )
 
-                val symbol =
-                    memorySymbols[
-                        memoryCards[i]
-                    ]
-
                 text(
                     canvas,
-                    symbol,
-                    (l + r) / 2f,
-                    (tt + b) / 2f + 10f,
-                    25f,
-                    0xff61e8ff.toInt(),
+                    "WAIT",
+                    cx,
+                    cy + 9f,
+                    19f,
+                    Color.WHITE,
                     true,
                     Paint.Align.CENTER
                 )
 
-            } else {
+                text(
+                    canvas,
+                    "Don't tap yet",
+                    cx,
+                    cy + 125f,
+                    14f,
+                    0xffaab7d8.toInt(),
+                    false,
+                    Paint.Align.CENTER
+                )
+            }
 
-                paint.color =
-                    Color.rgb(
-                        22,
-                        29,
-                        62
+            2 -> {
+                for (i in 0..4) {
+                    paint.color = Color.argb(
+                        24 - i * 3,
+                        65,
+                        255,
+                        150
                     )
 
-                canvas.drawRoundRect(
-                    l,
-                    tt,
-                    r,
-                    b,
-                    13f,
-                    13f,
+                    canvas.drawCircle(
+                        cx,
+                        cy,
+                        80f + i * 40f +
+                            sin(animation * 4f) * 6f,
+                        paint
+                    )
+                }
+
+                paint.color = 0xff50ef9b.toInt()
+
+                canvas.drawCircle(
+                    cx,
+                    cy,
+                    78f,
                     paint
                 )
 
                 text(
                     canvas,
-                    "?",
-                    (l + r) / 2f,
-                    (tt + b) / 2f + 9f,
-                    22f,
-                    0xff6979a8.toInt(),
+                    "GO!",
+                    cx,
+                    cy + 10f,
+                    25f,
+                    Color.WHITE,
                     true,
                     Paint.Align.CENTER
                 )
             }
-        }
 
-        if (memoryPairs >= 8) {
+            3 -> {
+                text(
+                    canvas,
+                    "${reactionTime}ms",
+                    cx,
+                    cy,
+                    45f,
+                    0xff58e8ff.toInt(),
+                    true,
+                    Paint.Align.CENTER
+                )
 
-            card(
-                canvas,
-                28f,
-                310f,
-                w - 28f,
-                410f,
-                22f
-            )
+                text(
+                    canvas,
+                    "REACTION TIME",
+                    cx,
+                    cy + 35f,
+                    12f,
+                    0xffaab7d8.toInt(),
+                    true,
+                    Paint.Align.CENTER
+                )
 
-            text(
-                canvas,
-                "MEMORY COMPLETE!",
-                w / 2f,
-                345f,
-                19f,
-                0xff62e7ff.toInt(),
-                true,
-                Paint.Align.CENTER
-            )
-
-            text(
-                canvas,
-                "+100 XP",
-                w / 2f,
-                374f,
-                15f,
-                0xffffd36a.toInt(),
-                true,
-                Paint.Align.CENTER
-            )
+                button(
+                    canvas,
+                    "TRY AGAIN",
+                    w * 0.18f,
+                    h * 0.63f,
+                    w * 0.82f,
+                    h * 0.71f
+                )
+            }
         }
     }
 
     // =========================================================
-    // NUMBER FLOW
+    // 4. NUMBER FLOW
     // =========================================================
 
     private fun drawNumberFlow(
@@ -1473,31 +1586,50 @@ private class MindBlowView(context: Context) : View(context) {
         w: Float,
         h: Float
     ) {
-
-        header(
+        gameHeader(
             canvas,
-            "Number Flow",
+            "NUMBER FLOW",
             "Remember the sequence"
         )
 
-        text(
+        drawGameStats(
             canvas,
-            "LEVEL $numberLevel",
-            20f,
-            94f,
-            13f,
-            0xff61e7ff.toInt(),
-            true
+            w,
+            "LEVEL $gameRound",
+            "SCORE $gameScore"
         )
 
-        if (!numberRunning) {
+        if (!gameStarted) {
+            gameIntro(
+                canvas,
+                w,
+                h,
+                "NUMBER FLOW",
+                "A number sequence appears briefly.",
+                "Remember it and enter it correctly.",
+                "START"
+            )
+            return
+        }
+
+        if (numberShowing) {
+            text(
+                canvas,
+                "MEMORIZE",
+                w / 2f,
+                h * 0.25f,
+                12f,
+                0xff5de7ff.toInt(),
+                true,
+                Paint.Align.CENTER
+            )
 
             text(
                 canvas,
-                "Train your working memory.",
+                numberSequence,
                 w / 2f,
-                230f,
-                21f,
+                h * 0.39f,
+                42f,
                 Color.WHITE,
                 true,
                 Paint.Align.CENTER
@@ -1505,110 +1637,54 @@ private class MindBlowView(context: Context) : View(context) {
 
             text(
                 canvas,
-                "Remember the numbers, then enter them.",
+                "Watch carefully...",
                 w / 2f,
-                265f,
+                h * 0.46f,
                 13f,
-                0xffaab7d9.toInt(),
+                0xff9eacd2.toInt(),
                 false,
                 Paint.Align.CENTER
-            )
-
-            button(
-                canvas,
-                "START NUMBER FLOW",
-                w * 0.13f,
-                320f,
-                w * 0.87f,
-                372f
             )
 
             return
         }
 
-        if (numberShowing) {
+        card(
+            canvas,
+            24f,
+            h * 0.20f,
+            w - 24f,
+            h * 0.30f,
+            20f
+        )
 
-            text(
-                canvas,
-                numberSequence.joinToString("  "),
-                w / 2f,
-                245f,
-                35f,
-                0xff62e7ff.toInt(),
-                true,
-                Paint.Align.CENTER
-            )
+        text(
+            canvas,
+            if (numberInput.isEmpty()) "ENTER SEQUENCE" else numberInput,
+            w / 2f,
+            h * 0.265f,
+            25f,
+            if (numberInput.isEmpty()) {
+                0xff7786ad.toInt()
+            } else {
+                Color.WHITE
+            },
+            true,
+            Paint.Align.CENTER
+        )
 
-            text(
-                canvas,
-                "MEMORIZE",
-                w / 2f,
-                285f,
-                12f,
-                0xff9eacd2.toInt(),
-                true,
-                Paint.Align.CENTER
-            )
+        val gridTop = h * 0.36f
+        val cell = (w - 70f) / 3f
 
-        } else {
+        for (i in 1..9) {
+            val n = i - 1
+            val row = n / 3
+            val col = n % 3
 
-            card(
-                canvas,
-                35f,
-                170f,
-                w - 35f,
-                245f,
-                20f
-            )
-
-            text(
-                canvas,
-                if (numberInput.isEmpty()) "Enter sequence" else numberInput,
-                w / 2f,
-                217f,
-                27f,
-                Color.WHITE,
-                true,
-                Paint.Align.CENTER
-            )
-
-            drawNumberPad(
-                canvas,
-                w
-            )
-        }
-    }
-
-    private fun drawNumberPad(
-        canvas: Canvas,
-        w: Float
-    ) {
-
-        val startY = 280f
-        val gap = 9f
-        val size = (w - 64f) / 3f
-
-        for (n in 1..9) {
-
-            val index = n - 1
-
-            val row =
-                index / 3
-
-            val col =
-                index % 3
-
-            val l =
-                20f + col * (size + gap)
-
-            val t =
-                startY + row * (size * 0.65f + gap)
-
-            val r =
-                l + size
-
-            val b =
-                t + size * 0.55f
+            val l = 20f + col * (cell + 15f)
+            val t = gridTop + row * (cell + 15f)
+            val r = l + cell
+            val b = t + cell
 
             card(
                 canvas,
@@ -1616,136 +1692,404 @@ private class MindBlowView(context: Context) : View(context) {
                 t,
                 r,
                 b,
-                14f
+                17f
             )
 
             text(
                 canvas,
-                n.toString(),
+                i.toString(),
                 (l + r) / 2f,
                 (t + b) / 2f + 8f,
-                19f,
+                23f,
                 Color.WHITE,
                 true,
                 Paint.Align.CENTER
             )
         }
 
-        val zeroTop =
-            startY + 3 * (size * 0.65f + gap)
-
-        card(
+        button(
             canvas,
-            20f,
-            zeroTop,
-            w / 2f - 5f,
-            zeroTop + size * 0.55f,
-            14f
-        )
-
-        text(
-            canvas,
-            "0",
-            w / 4f - 2f,
-            zeroTop + size * 0.35f,
-            19f,
-            Color.WHITE,
-            true,
-            Paint.Align.CENTER
+            "CLEAR",
+            22f,
+            h * 0.82f,
+            w * 0.46f,
+            h * 0.89f
         )
 
         button(
             canvas,
             "CHECK",
-            w / 2f + 5f,
-            zeroTop,
-            w - 20f,
-            zeroTop + size * 0.55f
+            w * 0.54f,
+            h * 0.82f,
+            w - 22f,
+            h * 0.89f
         )
     }
 
     // =========================================================
-    // CALM FLOW
+    // 5. PATTERN PULSE
     // =========================================================
 
-    private fun drawCalm(
+    private fun drawPatternPulse(
         canvas: Canvas,
         w: Float,
         h: Float
     ) {
-
-        header(
+        gameHeader(
             canvas,
-            "Calm Flow",
-            "A tiny breathing reset"
+            "PATTERN PULSE",
+            "Remember the glowing pattern"
         )
 
-        val elapsed =
-            if (calmRunning) {
-                SystemClock.uptimeMillis() - calmStart
-            } else {
-                0L
-            }
-
-        if (calmRunning) {
-            calmSeconds =
-                (elapsed / 1000L).toInt()
-
-            val phaseTime =
-                (elapsed / 4000L) % 3L
-
-            calmPhase =
-                when (phaseTime.toInt()) {
-                    0 -> "BREATHE IN"
-                    1 -> "HOLD"
-                    else -> "BREATHE OUT"
-                }
+        if (!gameStarted) {
+            gameIntro(
+                canvas,
+                w,
+                h,
+                "PATTERN PULSE",
+                "A pattern flashes on the board.",
+                "Recreate it after it disappears.",
+                "START"
+            )
+            return
         }
 
-        val phaseProgress =
-            ((elapsed % 4000L).toFloat() / 4000f)
+        if (gameOver) {
+            gameResult(
+                canvas,
+                w,
+                h,
+                "PATTERN COMPLETE",
+                "$gameScore POINTS",
+                "XP EARNED  +${gameScore * 10}",
+                "PLAY AGAIN"
+            )
+            return
+        }
 
-        val wave =
-            when (calmPhase) {
-                "BREATHE IN" -> phaseProgress
-                "BREATHE OUT" -> 1f - phaseProgress
-                else -> 1f
+        text(
+            canvas,
+            if (patternShowing) "MEMORIZE THE PATTERN" else "RECREATE IT",
+            w / 2f,
+            h * 0.19f,
+            12f,
+            0xffaab8dc.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
+
+        val size = min(w * 0.76f, 320f)
+        val left = (w - size) / 2f
+        val top = h * 0.26f
+        val cell = size / 3f
+
+        for (i in 0 until 9) {
+            val row = i / 3
+            val col = i % 3
+
+            val l = left + col * cell + 5f
+            val t = top + row * cell + 5f
+            val r = left + (col + 1) * cell - 5f
+            val b = top + (row + 1) * cell - 5f
+
+            val lit =
+                if (patternShowing) {
+                    pattern[i]
+                } else {
+                    patternSelected[i]
+                }
+
+            paint.color =
+                if (lit) {
+                    0xff51e7ff.toInt()
+                } else {
+                    Color.argb(210, 11, 20, 48)
+                }
+
+            canvas.drawRoundRect(
+                l,
+                t,
+                r,
+                b,
+                15f,
+                15f,
+                paint
+            )
+
+            if (lit) {
+                paint.color = Color.WHITE
+
+                canvas.drawCircle(
+                    (l + r) / 2f,
+                    (t + b) / 2f,
+                    6f,
+                    paint
+                )
+            }
+        }
+
+        if (!patternShowing) {
+            button(
+                canvas,
+                "CHECK PATTERN",
+                w * 0.16f,
+                h * 0.78f,
+                w * 0.84f,
+                h * 0.86f
+            )
+        }
+    }
+
+    // =========================================================
+    // 6. CALM FLOW
+    // =========================================================
+
+    private fun drawCalmFlow(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        gameHeader(
+            canvas,
+            "CALM FLOW",
+            "Follow the breathing circle"
+        )
+
+        val cx = w / 2f
+        val cy = h * 0.42f
+
+        if (!gameStarted) {
+            gameIntro(
+                canvas,
+                w,
+                h,
+                "CALM FLOW",
+                "Follow the expanding and shrinking glow.",
+                "Complete three slow breathing cycles.",
+                "BEGIN"
+            )
+            return
+        }
+
+        val elapsed =
+            System.currentTimeMillis() - calmPhaseStarted
+
+        if (elapsed > 4000L) {
+            calmPhase =
+                (calmPhase + 1) % 2
+
+            calmPhaseStarted =
+                System.currentTimeMillis()
+
+            if (calmPhase == 0) {
+                calmCycles++
+            }
+
+            if (calmCycles >= 3) {
+                gameOver = true
+                saveScore(60)
+            }
+        }
+
+        if (gameOver) {
+            gameResult(
+                canvas,
+                w,
+                h,
+                "MIND RESET COMPLETE",
+                "3 BREATH CYCLES",
+                "XP EARNED  +60",
+                "FLOW AGAIN"
+            )
+            return
+        }
+
+        val progress =
+            (elapsed.coerceIn(0L, 4000L) / 4000f)
+
+        val amount =
+            if (calmPhase == 0) {
+                progress
+            } else {
+                1f - progress
             }
 
         val radius =
-            65f + wave * 75f
+            55f + amount * 90f
 
-        paint.color =
-            Color.argb(
-                28,
+        for (i in 5 downTo 1) {
+            paint.color = Color.argb(
+                18,
                 70,
-                220,
+                225,
                 255
             )
 
-        canvas.drawCircle(
-            w / 2f,
-            250f,
-            radius + 35f,
-            paint
-        )
+            canvas.drawCircle(
+                cx,
+                cy,
+                radius + i * 18f,
+                paint
+            )
+        }
 
-        paint.color =
-            0xff57e7ff.toInt()
+        paint.color = 0xff55e8ff.toInt()
 
         canvas.drawCircle(
-            w / 2f,
-            250f,
+            cx,
+            cy,
             radius,
             paint
         )
 
         text(
             canvas,
-            if (calmRunning) calmPhase else "READY",
-            w / 2f,
-            255f,
+            if (calmPhase == 0) "INHALE" else "EXHALE",
+            cx,
+            cy + 7f,
             18f,
+            0xff07111e.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
+
+        text(
+            canvas,
+            "CYCLE ${min(calmCycles + 1, 3)} / 3",
+            cx,
+            h * 0.64f,
+            13f,
+            0xffaebbdc.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
+
+        text(
+            canvas,
+            "Slow and steady",
+            cx,
+            h * 0.69f,
+            14f,
+            Color.WHITE,
+            true,
+            Paint.Align.CENTER
+        )
+    }
+
+    // =========================================================
+    // GAME HEADER
+    // =========================================================
+
+    private fun gameHeader(
+        canvas: Canvas,
+        title: String,
+        subtitle: String
+    ) {
+        text(
+            canvas,
+            "‹",
+            20f,
+            47f,
+            38f,
+            Color.WHITE,
+            false
+        )
+
+        text(
+            canvas,
+            title,
+            57f,
+            38f,
+            21f,
+            Color.WHITE,
+            true
+        )
+
+        text(
+            canvas,
+            subtitle,
+            57f,
+            58f,
+            10f,
+            0xff9da9cf.toInt()
+        )
+    }
+
+    private fun drawGameStats(
+        canvas: Canvas,
+        w: Float,
+        leftText: String,
+        rightText: String
+    ) {
+        card(
+            canvas,
+            18f,
+            75f,
+            w - 18f,
+            112f,
+            17f
+        )
+
+        text(
+            canvas,
+            leftText,
+            32f,
+            99f,
+            11f,
+            0xff59e6ff.toInt(),
+            true
+        )
+
+        text(
+            canvas,
+            rightText,
+            w - 32f,
+            99f,
+            11f,
+            0xffffcf57.toInt(),
+            true,
+            Paint.Align.RIGHT
+        )
+    }
+
+    // =========================================================
+    // GAME INTRO
+    // =========================================================
+
+    private fun gameIntro(
+        canvas: Canvas,
+        w: Float,
+        h: Float,
+        title: String,
+        line1: String,
+        line2: String,
+        buttonText: String
+    ) {
+        val cy = h * 0.37f
+
+        for (i in 0 until 5) {
+            paint.color = Color.argb(
+                18,
+                70,
+                220,
+                255
+            )
+
+            canvas.drawCircle(
+                w / 2f,
+                cy,
+                40f + i * 27f +
+                    sin(animation + i) * 5f,
+                paint
+            )
+        }
+
+        text(
+            canvas,
+            title,
+            w / 2f,
+            cy + 8f,
+            25f,
             Color.WHITE,
             true,
             Paint.Align.CENTER
@@ -1753,157 +2097,102 @@ private class MindBlowView(context: Context) : View(context) {
 
         text(
             canvas,
-            if (calmRunning)
-                "$calmSeconds seconds"
-            else
-                "Slow breathing can help you pause.",
+            line1,
             w / 2f,
-            330f,
+            h * 0.57f,
             13f,
-            0xffaebadd.toInt(),
+            0xffaab8db.toInt(),
             false,
             Paint.Align.CENTER
         )
 
-        if (!calmRunning) {
-
-            button(
-                canvas,
-                "START 60 SECOND RESET",
-                w * 0.12f,
-                380f,
-                w * 0.88f,
-                432f
-            )
-
-        } else {
-
-            button(
-                canvas,
-                "END SESSION",
-                w * 0.20f,
-                380f,
-                w * 0.80f,
-                432f
-            )
-        }
-    }
-
-    // =========================================================
-    // DAILY
-    // =========================================================
-
-    private fun drawDaily(
-        canvas: Canvas,
-        w: Float,
-        h: Float
-    ) {
-
-        header(
-            canvas,
-            "Daily Reset",
-            "One small challenge today"
-        )
-
-        card(
-            canvas,
-            18f,
-            90f,
-            w - 18f,
-            280f,
-            24f
-        )
-
         text(
             canvas,
-            "TODAY'S MISSION",
-            36f,
-            127f,
-            11f,
-            0xff61e7ff.toInt(),
-            true
-        )
-
-        text(
-            canvas,
-            "Play 1 mind game",
-            36f,
-            165f,
-            25f,
-            Color.WHITE,
-            true
-        )
-
-        text(
-            canvas,
-            "Finish any game to complete",
-            36f,
-            195f,
+            line2,
+            w / 2f,
+            h * 0.60f,
             13f,
-            0xffaab7d8.toInt()
-        )
-
-        text(
-            canvas,
-            "your daily reset.",
-            36f,
-            216f,
-            13f,
-            0xffaab7d8.toInt()
+            0xffaab8db.toInt(),
+            false,
+            Paint.Align.CENTER
         )
 
         button(
             canvas,
-            "PLAY A GAME",
-            36f,
-            232f,
-            w - 36f,
-            270f
+            buttonText,
+            w * 0.14f,
+            h * 0.68f,
+            w * 0.86f,
+            h * 0.76f
+        )
+    }
+
+    // =========================================================
+    // GAME RESULT
+    // =========================================================
+
+    private fun gameResult(
+        canvas: Canvas,
+        w: Float,
+        h: Float,
+        title: String,
+        result: String,
+        xp: String,
+        buttonText: String
+    ) {
+        val cy = h * 0.36f
+
+        text(
+            canvas,
+            "✦",
+            w / 2f,
+            cy - 45f,
+            48f,
+            0xff5ce8ff.toInt(),
+            true,
+            Paint.Align.CENTER
         )
 
         text(
             canvas,
-            "🔥  $streak day streak",
-            22f,
-            330f,
-            19f,
-            0xffffb52e.toInt(),
-            true
-        )
-
-        card(
-            canvas,
-            20f,
-            355f,
-            w - 20f,
-            425f,
-            20f
-        )
-
-        text(
-            canvas,
-            "Your progress",
-            38f,
-            388f,
-            15f,
+            title,
+            w / 2f,
+            cy + 10f,
+            21f,
             Color.WHITE,
-            true
+            true,
+            Paint.Align.CENTER
         )
 
         text(
             canvas,
-            "$score XP earned",
-            38f,
-            412f,
-            12f,
-            0xffa7b5d8.toInt()
+            result,
+            w / 2f,
+            cy + 55f,
+            28f,
+            0xff5ce8ff.toInt(),
+            true,
+            Paint.Align.CENTER
         )
 
-        navigation(
+        text(
             canvas,
-            w,
-            h,
-            3
+            xp,
+            w / 2f,
+            cy + 82f,
+            12f,
+            0xffffce57.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
+
+        button(
+            canvas,
+            buttonText,
+            w * 0.15f,
+            h * 0.64f,
+            w * 0.85f,
+            h * 0.73f
         )
     }
 
@@ -1916,7 +2205,6 @@ private class MindBlowView(context: Context) : View(context) {
         w: Float,
         h: Float
     ) {
-
         header(
             canvas,
             "Profile",
@@ -1926,34 +2214,19 @@ private class MindBlowView(context: Context) : View(context) {
         card(
             canvas,
             18f,
-            88f,
+            82f,
             w - 18f,
-            220f,
-            24f
-        )
-
-        paint.color =
-            Color.argb(
-                40,
-                60,
-                220,
-                255
-            )
-
-        canvas.drawCircle(
-            68f,
-            151f,
-            42f,
-            paint
+            230f,
+            25f
         )
 
         text(
             canvas,
-            "✦",
+            "M",
             68f,
-            167f,
-            42f,
-            0xff62e8ff.toInt(),
+            157f,
+            48f,
+            0xff5ce7ff.toInt(),
             true,
             Paint.Align.CENTER
         )
@@ -1961,8 +2234,8 @@ private class MindBlowView(context: Context) : View(context) {
         text(
             canvas,
             "Mind Explorer",
+            108f,
             125f,
-            135f,
             20f,
             Color.WHITE,
             true
@@ -1970,90 +2243,76 @@ private class MindBlowView(context: Context) : View(context) {
 
         text(
             canvas,
-            "Level ${score / 250 + 1}",
-            125f,
-            163f,
-            13f,
-            0xffaab7d9.toInt()
+            "LEVEL $level",
+            108f,
+            151f,
+            12f,
+            0xff5ce7ff.toInt(),
+            true
         )
 
         text(
             canvas,
             "$score XP",
-            125f,
-            190f,
+            108f,
+            179f,
             13f,
-            0xffffd46a.toInt(),
-            true
-        )
-
-        text(
-            canvas,
-            "🔥 $streak day streak",
-            125f,
-            214f,
-            12f,
-            0xffffb52e.toInt()
-        )
-
-        card(
-            canvas,
-            18f,
-            240f,
-            w - 18f,
-            410f,
-            22f
-        )
-
-        text(
-            canvas,
-            "Games completed",
-            38f,
-            280f,
-            15f,
-            Color.WHITE,
-            true
-        )
-
-        text(
-            canvas,
-            "${score / 20}",
-            w - 38f,
-            280f,
-            18f,
-            0xff5fe7ff.toInt(),
-            true,
-            Paint.Align.RIGHT
-        )
-
-        text(
-            canvas,
-            "XP needed for next level",
-            38f,
-            325f,
-            14f,
             0xffa5b2d5.toInt()
         )
 
         text(
             canvas,
-            "${250 - (score % 250)}",
-            w - 38f,
-            325f,
-            14f,
-            Color.WHITE,
-            true,
-            Paint.Align.RIGHT
+            "$streak day streak",
+            108f,
+            202f,
+            12f,
+            0xffffc64d.toInt()
         )
 
-        text(
-            canvas,
-            "Keep playing to unlock more progress.",
-            38f,
-            365f,
-            11f,
-            0xff7787b1.toInt()
+        val rows = arrayOf(
+            "Games completed",
+            "Current level",
+            "Total XP"
         )
+
+        val values = arrayOf(
+            "${score / 25}",
+            "$level",
+            "$score"
+        )
+
+        for (i in 0..2) {
+            val y = 278f + i * 53f
+
+            card(
+                canvas,
+                18f,
+                y - 26f,
+                w - 18f,
+                y + 18f,
+                15f
+            )
+
+            text(
+                canvas,
+                rows[i],
+                34f,
+                y,
+                12f,
+                0xff9da9cd.toInt()
+            )
+
+            text(
+                canvas,
+                values[i],
+                w - 34f,
+                y,
+                13f,
+                Color.WHITE,
+                true,
+                Paint.Align.RIGHT
+            )
+        }
 
         navigation(
             canvas,
@@ -2072,104 +2331,97 @@ private class MindBlowView(context: Context) : View(context) {
         w: Float,
         h: Float
     ) {
-
-        val top =
-            h - 138f
+        val top = h - 135f
 
         card(
             canvas,
-            25f,
+            28f,
             top,
-            w - 25f,
-            top + 54f,
+            w - 28f,
+            top + 50f,
             18f
         )
 
         text(
             canvas,
-            toastText,
+            message,
             w / 2f,
-            top + 33f,
-            13f,
+            top + 31f,
+            12f,
             Color.WHITE,
             true,
             Paint.Align.CENTER
         )
     }
 
-    private fun toast(message: String) {
-
-        toastText = message
-
-        toastUntil =
-            SystemClock.uptimeMillis() + 1400L
+    private fun showMessage(value: String) {
+        message = value
+        messageUntil =
+            System.currentTimeMillis() + 1500L
     }
 
     // =========================================================
-    // GAME UPDATES
+    // GAME UPDATE
     // =========================================================
 
     private fun updateGames() {
 
-        val now =
-            SystemClock.uptimeMillis()
+        if (screen != Screen.GAME) {
+            return
+        }
 
-        if (
-            screen == Screen.FOCUS &&
-            focusStarted &&
-            now >= focusEnd
-        ) {
+        when (selectedGame) {
 
-            focusStarted = false
-
-            if (focusScore > 0) {
-                score += focusScore * 5
-                save()
-                toast(
-                    "Focus finished! +${focusScore * 5} XP"
-                )
+            GameType.NEURO_TAP -> {
+                if (
+                    gameStarted &&
+                    !gameOver &&
+                    System.currentTimeMillis() > neuroExpires
+                ) {
+                    gameOver = true
+                    saveScore(gameScore * 8)
+                }
             }
 
-            focusScore = 0
-        }
+            GameType.COLOR_SHIFT -> {
+                // No automatic timer.
+            }
 
-        if (
-            screen == Screen.MEMORY &&
-            memoryHideAt > 0L &&
-            now >= memoryHideAt &&
-            memoryOpen1 >= 0 &&
-            memoryOpen2 >= 0
-        ) {
+            GameType.REACTION_RUSH -> {
+                if (
+                    reactionState == 1 &&
+                    System.currentTimeMillis() -
+                    reactionStarted >= reactionDelay
+                ) {
+                    reactionState = 2
+                    reactionStarted =
+                        System.currentTimeMillis()
+                }
+            }
 
-            memoryOpen1 = -1
-            memoryOpen2 = -1
-            memoryLocked = false
-            memoryHideAt = 0L
-        }
+            GameType.NUMBER_FLOW -> {
+                if (
+                    numberShowing &&
+                    System.currentTimeMillis() >
+                    numberShowUntil
+                ) {
+                    numberShowing = false
+                }
+            }
 
-        if (
-            screen == Screen.NUMBER &&
-            numberShowing &&
-            now >= numberShowUntil
-        ) {
+            GameType.PATTERN_PULSE -> {
+                if (
+                    patternShowing &&
+                    System.currentTimeMillis() >
+                    patternShowUntil
+                ) {
+                    patternShowing = false
+                }
+            }
 
-            numberShowing = false
-        }
-
-        if (
-            screen == Screen.CALM &&
-            calmRunning &&
-            calmSeconds >= 60
-        ) {
-
-            calmRunning = false
-            score += 25
-            streak += 1
-            save()
-
-            toast(
-                "60 second reset complete! +25 XP"
-            )
+            GameType.CALM_FLOW -> {
+                // Updated inside drawCalmFlow.
+            }
         }
     }
 
@@ -2177,41 +2429,28 @@ private class MindBlowView(context: Context) : View(context) {
     // TOUCH
     // =========================================================
 
-    override fun onTouchEvent(
-        event: MotionEvent
-    ): Boolean {
+    override fun onTouchEvent(event: MotionEvent): Boolean {
 
         if (event.action != MotionEvent.ACTION_UP) {
             return true
         }
 
-        val x =
-            event.x
+        val x = event.x
+        val y = event.y
 
-        val y =
-            event.y
-
-        val w =
-            width.toFloat()
-
-        val h =
-            height.toFloat()
+        val w = width.toFloat()
+        val h = height.toFloat()
 
         when (screen) {
 
             Screen.SPLASH -> {
-                screen = Screen.WELCOME
+                // Wait for splash.
             }
 
             Screen.WELCOME -> {
-
-                if (y > h * 0.68f) {
-
+                if (y > h * 0.65f) {
                     prefs.edit()
-                        .putBoolean(
-                            "welcome_seen",
-                            true
-                        )
+                        .putBoolean("welcome_seen", true)
                         .apply()
 
                     screen = Screen.HOME
@@ -2226,37 +2465,18 @@ private class MindBlowView(context: Context) : View(context) {
                 gamesTouch(x, y, w, h)
             }
 
-            Screen.FOCUS -> {
-                focusTouch(x, y, w, h)
-            }
-
-            Screen.COLOR -> {
-                colorTouch(x, y, w, h)
-            }
-
-            Screen.MEMORY -> {
-                memoryTouch(x, y, w, h)
-            }
-
-            Screen.NUMBER -> {
-                numberTouch(x, y, w, h)
-            }
-
-            Screen.CALM -> {
-                calmTouch(x, y, w, h)
-            }
-
-            Screen.DAILY -> {
-                dailyTouch(x, y, w, h)
+            Screen.GAME -> {
+                gameTouch(x, y, w, h)
             }
 
             Screen.PROFILE -> {
-                profileTouch(x, y, w, h)
+                if (y < 75f) {
+                    screen = Screen.HOME
+                }
             }
         }
 
         invalidate()
-
         return true
     }
 
@@ -2271,57 +2491,54 @@ private class MindBlowView(context: Context) : View(context) {
         h: Float
     ) {
 
-        if (y > h - 95f) {
+        if (y > h - 90f) {
 
-            when {
-                x < w * 0.20f -> {
-                    screen = Screen.HOME
-                }
-
-                x < w * 0.40f -> {
-                    screen = Screen.GAMES
-                }
-
-                x < w * 0.60f -> {
-                    startFocus()
-                }
-
-                x < w * 0.80f -> {
-                    screen = Screen.DAILY
-                }
-
-                else -> {
-                    screen = Screen.PROFILE
-                }
+            if (x < w * 0.20f) {
+                screen = Screen.HOME
+                return
             }
 
-            return
+            if (x < w * 0.40f) {
+                screen = Screen.GAMES
+                return
+            }
+
+            if (x > w * 0.80f) {
+                screen = Screen.PROFILE
+                return
+            }
         }
 
-        if (y in 175f..225f) {
+        val heroBottom = h * 0.275f
 
-            screen = Screen.DAILY
-            return
-        }
+        val row1 = heroBottom + 58f
+        val row2 = row1 + 102f
 
-        if (y in 266f..355f) {
+        val gap = 10f
+        val cardW = (w - 36f - gap) / 2f
 
-            if (x < w / 2f) {
-                startFocus()
+        if (
+            y >= row1 &&
+            y <= row1 + 92f
+        ) {
+            if (x < 18f + cardW) {
+                startGame(GameType.NEURO_TAP)
             } else {
-                startColor()
+                startGame(GameType.COLOR_SHIFT)
             }
-
             return
         }
 
-        if (y in 365f..455f) {
-
-            if (x < w / 2f) {
-                startMemory()
+        if (
+            y >= row2 &&
+            y <= row2 + 92f
+        ) {
+            if (x < 18f + cardW) {
+                startGame(GameType.REACTION_RUSH)
             } else {
-                startNumber()
+                startGame(GameType.PATTERN_PULSE)
             }
+            return
         }
     }
 
@@ -2336,138 +2553,184 @@ private class MindBlowView(context: Context) : View(context) {
         h: Float
     ) {
 
-        if (y < 75f) {
+        if (y < 70f) {
             screen = Screen.HOME
             return
         }
 
-        if (y > h - 95f) {
+        if (y > h - 90f) {
 
-            when {
-                x < w * 0.20f ->
-                    screen = Screen.HOME
-
-                x < w * 0.40f ->
-                    screen = Screen.GAMES
-
-                x < w * 0.60f ->
-                    startFocus()
-
-                x < w * 0.80f ->
-                    screen = Screen.DAILY
-
-                else ->
-                    screen = Screen.PROFILE
+            if (x < w * 0.20f) {
+                screen = Screen.HOME
+                return
             }
 
-            return
+            if (x > w * 0.80f) {
+                screen = Screen.PROFILE
+                return
+            }
         }
 
-        if (y in 92f..195f) {
+        val top = 82f
+        val gap = 10f
+        val cw = (w - 36f - gap) / 2f
 
-            if (x < w / 2f) {
-                startFocus()
+        if (y in top..(top + 105f)) {
+            if (x < 18f + cw) {
+                startGame(GameType.NEURO_TAP)
             } else {
-                startColor()
+                startGame(GameType.COLOR_SHIFT)
             }
-
             return
         }
 
-        if (y in 207f..310f) {
-
-            if (x < w / 2f) {
-                startMemory()
+        if (
+            y in (top + 115f)..(top + 220f)
+        ) {
+            if (x < 18f + cw) {
+                startGame(GameType.REACTION_RUSH)
             } else {
-                startNumber()
+                startGame(GameType.NUMBER_FLOW)
             }
-
             return
         }
 
-        if (y in 322f..425f) {
-
-            startCalm()
+        if (
+            y in (top + 230f)..(top + 335f)
+        ) {
+            if (x < 18f + cw) {
+                startGame(GameType.PATTERN_PULSE)
+            } else {
+                startGame(GameType.CALM_FLOW)
+            }
         }
     }
 
     // =========================================================
-    // FOCUS TOUCH
+    // GAME TOUCH
     // =========================================================
 
-    private fun focusTouch(
+    private fun gameTouch(
         x: Float,
         y: Float,
         w: Float,
         h: Float
     ) {
 
-        if (y < 75f) {
+        if (y < 70f) {
             screen = Screen.GAMES
             return
         }
 
-        if (!focusStarted) {
+        when (selectedGame) {
 
-            if (y in 310f..410f) {
-                startFocus()
+            GameType.NEURO_TAP ->
+                neuroTouch(x, y, w, h)
+
+            GameType.COLOR_SHIFT ->
+                colorTouch(x, y, w, h)
+
+            GameType.REACTION_RUSH ->
+                reactionTouch(x, y, w, h)
+
+            GameType.NUMBER_FLOW ->
+                numberTouch(x, y, w, h)
+
+            GameType.PATTERN_PULSE ->
+                patternTouch(x, y, w, h)
+
+            GameType.CALM_FLOW ->
+                calmTouch(x, y, w, h)
+        }
+    }
+
+    // =========================================================
+    // NEURO TOUCH
+    // =========================================================
+
+    private fun neuroTouch(
+        x: Float,
+        y: Float,
+        w: Float,
+        h: Float
+    ) {
+
+        if (!gameStarted) {
+
+            if (y > h * 0.62f) {
+                startNeuro()
             }
 
             return
         }
 
-        val dx =
-            x - focusX
+        if (gameOver) {
 
-        val dy =
-            y - focusY
+            if (y > h * 0.58f) {
+                startNeuro()
+            }
 
-        val distance =
-            dx * dx + dy * dy
+            return
+        }
 
-        if (distance <= focusRadius * focusRadius * 2.2f) {
+        val dx = x - neuroX
+        val dy = y - neuroY
 
-            focusScore += 1
-            focusRound += 1
+        if (
+            dx * dx + dy * dy <=
+            (neuroRadius + 18f) *
+            (neuroRadius + 18f)
+        ) {
 
-            score += 5
+            neuroHits++
+            gameScore++
+            gameRound++
+
+            score += 8
+
+            neuroRadius =
+                maxOf(
+                    23f,
+                    34f - gameRound * 0.7f
+                )
+
+            spawnNeuro(w, h)
+
             save()
-
-            moveFocusOrb()
-
-            toast(
-                "+5 XP  •  Nice focus!"
-            )
+            showMessage("+8 XP  •  NICE!")
         }
     }
 
-    private fun startFocus() {
-
-        screen = Screen.FOCUS
-
-        focusScore = 0
-        focusRound = 1
-        focusStarted = true
-
-        focusEnd =
-            SystemClock.uptimeMillis() + 30000L
-
-        moveFocusOrb()
+    private fun startNeuro() {
+        gameStarted = true
+        gameOver = false
+        gameScore = 0
+        gameRound = 1
+        neuroHits = 0
+        neuroRadius = 34f
+        spawnNeuro(width.toFloat(), height.toFloat())
     }
 
-    private fun moveFocusOrb() {
+    private fun spawnNeuro(
+        w: Float,
+        h: Float
+    ) {
+        neuroX =
+            45f + Random.nextFloat() * (w - 90f)
 
-        val w =
-            width.toFloat()
+        neuroY =
+            h * 0.22f +
+                Random.nextFloat() *
+                h * 0.50f
 
-        focusX =
-            40f + Random.nextFloat() * (w - 80f)
+        val duration =
+            maxOf(
+                650L,
+                1550L - gameRound * 35L
+            )
 
-        focusY =
-            210f + Random.nextFloat() * 220f
-
-        focusRadius =
-            24f + Random.nextFloat() * 7f
+        neuroExpires =
+            System.currentTimeMillis() + duration
     }
 
     // =========================================================
@@ -2481,264 +2744,162 @@ private class MindBlowView(context: Context) : View(context) {
         h: Float
     ) {
 
-        if (y < 75f) {
+        if (!colorRunning) {
 
-            screen = Screen.GAMES
-            return
-        }
-
-        val gridSize =
-            if (colorGrid < 5) 4 else 5
-
-        val boardSize =
-            min(w - 40f, 330f)
-
-        val left =
-            (w - boardSize) / 2f
-
-        val top = 125f
-
-        if (
-            x < left ||
-            x > left + boardSize ||
-            y < top ||
-            y > top + boardSize
-        ) {
-            return
-        }
-
-        val cell =
-            boardSize / gridSize.toFloat()
-
-        val col =
-            ((x - left) / cell).toInt()
-
-        val row =
-            ((y - top) / cell).toInt()
-
-        if (
-            col < 0 ||
-            col >= gridSize ||
-            row < 0 ||
-            row >= gridSize
-        ) {
-            return
-        }
-
-        val index =
-            row * gridSize + col
-
-        if (index == colorTarget) {
-
-            score += 10 + colorLevel * 2
-            colorLevel += 1
-
-            if (colorLevel % 4 == 0) {
-                colorGrid = 5
+            if (y > h * 0.62f) {
+                startColorGame()
             }
 
-            save()
+            return
+        }
 
-            colorMessage =
-                "+${10 + colorLevel * 2} XP"
+        val bw = (w - 52f) / 2f
+        val startY = h * 0.52f
 
-            makeColorRound()
+        for (i in 0 until 4) {
 
-            toast(
-                "Great eyes! +XP"
-            )
-        } else {
+            val row = i / 2
+            val col = i % 2
 
-            colorMessage =
-                "Try again"
+            val l = 18f + col * (bw + 16f)
+            val t = startY + row * 75f
+            val r = l + bw
+            val b = t + 58f
 
-            toast(
-                "Almost! Find the brighter tile."
-            )
+            if (
+                x >= l &&
+                x <= r &&
+                y >= t &&
+                y <= b
+            ) {
+
+                if (colorOptions[i] == colorIndex) {
+
+                    gameScore++
+                    gameRound++
+                    score += 10
+
+                    save()
+
+                    showMessage(
+                        "Correct! +10 XP"
+                    )
+
+                    nextColorRound()
+
+                } else {
+
+                    showMessage(
+                        "Wrong color — try again"
+                    )
+                }
+
+                return
+            }
         }
     }
 
-    private fun startColor() {
-
-        screen = Screen.COLOR
-
-        colorLevel = 1
-        colorGrid = 4
-
-        makeColorRound()
+    private fun startColorGame() {
+        gameStarted = true
+        colorRunning = true
+        gameScore = 0
+        gameRound = 1
+        nextColorRound()
     }
 
-    private fun makeColorRound() {
+    private fun nextColorRound() {
 
-        val count =
-            colorGrid * colorGrid
+        colorIndex =
+            Random.nextInt(4)
 
-        colorTarget =
-            Random.nextInt(count)
+        colorWord =
+            colorNames[
+                Random.nextInt(4)
+            ]
+
+        colorOptions =
+            intArrayOf(0, 1, 2, 3)
+
+        colorOptions.shuffle()
     }
 
     // =========================================================
-    // MEMORY TOUCH
+    // REACTION TOUCH
     // =========================================================
 
-    private fun memoryTouch(
+    private fun reactionTouch(
         x: Float,
         y: Float,
         w: Float,
         h: Float
     ) {
 
-        if (y < 75f) {
+        if (reactionState == 0) {
 
-            screen = Screen.GAMES
-            return
-        }
-
-        if (!memoryStarted) {
-
-            if (y in 300f..390f) {
-                startMemory()
+            if (y > h * 0.62f) {
+                startReaction()
             }
 
             return
         }
 
-        if (memoryPairs >= 8) {
+        if (reactionState == 1) {
 
-            if (y > 300f && y < 430f) {
-                startMemory()
-            }
+            reactionState = 3
+            reactionTime = -1L
+
+            showMessage("Too early!")
 
             return
         }
 
-        if (memoryLocked) {
-            return
-        }
+        if (reactionState == 2) {
 
-        val board =
-            min(w - 38f, 350f)
-
-        val left =
-            (w - board) / 2f
-
-        val top = 112f
-
-        if (
-            x < left ||
-            x > left + board ||
-            y < top ||
-            y > top + board
-        ) {
-            return
-        }
-
-        val cell =
-            board / 4f
-
-        val col =
-            ((x - left) / cell).toInt()
-
-        val row =
-            ((y - top) / cell).toInt()
-
-        if (
-            col !in 0..3 ||
-            row !in 0..3
-        ) {
-            return
-        }
-
-        val index =
-            row * 4 + col
-
-        if (
-            memoryMatched[index] ||
-            index == memoryOpen1
-        ) {
-            return
-        }
-
-        if (memoryOpen1 == -1) {
-
-            memoryOpen1 = index
-
-        } else {
-
-            memoryOpen2 = index
-            memoryMoves += 1
-            memoryLocked = true
+            reactionTime =
+                System.currentTimeMillis() -
+                    reactionStarted
 
             if (
-                memoryCards[memoryOpen1] ==
-                memoryCards[memoryOpen2]
+                reactionBest == Long.MAX_VALUE ||
+                reactionTime < reactionBest
             ) {
+                reactionBest = reactionTime
+            }
 
-                memoryMatched[memoryOpen1] = true
-                memoryMatched[memoryOpen2] = true
+            score += 25
+            save()
 
-                memoryPairs += 1
+            reactionState = 3
 
-                score += 15
+            showMessage(
+                "${reactionTime}ms  +25 XP"
+            )
 
-                save()
+            return
+        }
 
-                memoryOpen1 = -1
-                memoryOpen2 = -1
-                memoryLocked = false
+        if (reactionState == 3) {
 
-                toast(
-                    "Match! +15 XP"
-                )
-
-                if (memoryPairs >= 8) {
-
-                    score += 50
-                    save()
-
-                    toast(
-                        "Memory complete! +50 bonus"
-                    )
-                }
-
-            } else {
-
-                memoryHideAt =
-                    SystemClock.uptimeMillis() + 650L
-
-                toast(
-                    "Not a match"
-                )
+            if (
+                y > h * 0.58f
+            ) {
+                startReaction()
             }
         }
     }
 
-    private fun startMemory() {
+    private fun startReaction() {
 
-        screen = Screen.MEMORY
+        reactionState = 1
 
-        memoryCards =
-            mutableListOf<Int>().apply {
+        reactionStarted =
+            System.currentTimeMillis()
 
-                for (i in 0 until 8) {
-                    add(i)
-                    add(i)
-                }
-
-                shuffle()
-            }
-
-        memoryOpen1 = -1
-        memoryOpen2 = -1
-
-        memoryMatched =
-            BooleanArray(16)
-
-        memoryLocked = false
-        memoryMoves = 0
-        memoryPairs = 0
-        memoryStarted = true
-        memoryHideAt = 0L
+        reactionDelay =
+            Random.nextLong(
+                1300L,
+                3500L
+            )
     }
 
     // =========================================================
@@ -2752,15 +2913,9 @@ private class MindBlowView(context: Context) : View(context) {
         h: Float
     ) {
 
-        if (y < 75f) {
+        if (!gameStarted) {
 
-            screen = Screen.GAMES
-            return
-        }
-
-        if (!numberRunning) {
-
-            if (y in 310f..390f) {
+            if (y > h * 0.62f) {
                 startNumber()
             }
 
@@ -2771,32 +2926,19 @@ private class MindBlowView(context: Context) : View(context) {
             return
         }
 
-        val startY = 280f
-        val gap = 9f
-        val size = (w - 64f) / 3f
+        val gridTop = h * 0.36f
+        val cell = (w - 70f) / 3f
 
-        for (n in 1..9) {
+        for (i in 1..9) {
 
-            val index =
-                n - 1
+            val n = i - 1
+            val row = n / 3
+            val col = n % 3
 
-            val row =
-                index / 3
-
-            val col =
-                index % 3
-
-            val l =
-                20f + col * (size + gap)
-
-            val t =
-                startY + row * (size * 0.65f + gap)
-
-            val r =
-                l + size
-
-            val b =
-                t + size * 0.55f
+            val l = 20f + col * (cell + 15f)
+            val t = gridTop + row * (cell + 15f)
+            val r = l + cell
+            val b = t + cell
 
             if (
                 x >= l &&
@@ -2805,31 +2947,20 @@ private class MindBlowView(context: Context) : View(context) {
                 y <= b
             ) {
 
-                numberInput += n.toString()
+                if (numberInput.length < 12) {
+                    numberInput += i.toString()
+                }
+
                 return
             }
         }
 
-        val zeroTop =
-            startY + 3 * (size * 0.65f + gap)
+        if (y > h * 0.80f) {
 
-        if (
-            x >= 20f &&
-            x <= w / 2f - 5f &&
-            y >= zeroTop &&
-            y <= zeroTop + size * 0.55f
-        ) {
-
-            numberInput += "0"
-            return
-        }
-
-        if (
-            x >= w / 2f + 5f &&
-            x <= w - 20f &&
-            y >= zeroTop &&
-            y <= zeroTop + size * 0.55f
-        ) {
+            if (x < w * 0.50f) {
+                numberInput = ""
+                return
+            }
 
             checkNumber()
         }
@@ -2837,65 +2968,236 @@ private class MindBlowView(context: Context) : View(context) {
 
     private fun startNumber() {
 
-        screen = Screen.NUMBER
+        gameStarted = true
+        gameScore = 0
+        gameRound = 1
+        numberInput = ""
 
-        numberRunning = true
-        numberLevel = 1
-
-        createNumberRound()
+        createNumberSequence()
     }
 
-    private fun createNumberRound() {
+    private fun createNumberSequence() {
+
+        val length =
+            min(3 + gameRound, 8)
+
+        val builder =
+            StringBuilder()
+
+        repeat(length) {
+            builder.append(
+                Random.nextInt(1, 10)
+            )
+        }
 
         numberSequence =
-            MutableList(
-                2 + numberLevel.coerceAtMost(6)
-            ) {
-                Random.nextInt(0, 10)
-            }
+            builder.toString()
 
         numberInput = ""
 
         numberShowing = true
 
         numberShowUntil =
-            SystemClock.uptimeMillis() +
-                    1200L +
-                    numberSequence.size * 350L
+            System.currentTimeMillis() +
+                1300L +
+                length * 180L
     }
 
     private fun checkNumber() {
 
-        val correct =
-            numberInput ==
-                    numberSequence.joinToString("")
+        if (numberInput == numberSequence) {
 
-        if (correct) {
-
-            val gained =
-                20 + numberLevel * 5
-
-            score += gained
-
-            numberLevel += 1
+            gameScore++
+            gameRound++
+            score += 20
 
             save()
 
-            toast(
-                "Correct! +$gained XP"
+            showMessage(
+                "Perfect memory! +20 XP"
             )
 
-            createNumberRound()
+            createNumberSequence()
 
         } else {
 
-            toast(
-                "Not quite. Try the next round."
+            showMessage(
+                "Sequence was $numberSequence"
             )
 
-            numberInput = ""
+            gameRound = 1
 
-            createNumberRound()
+            createNumberSequence()
+        }
+    }
+
+    // =========================================================
+    // PATTERN TOUCH
+    // =========================================================
+
+    private fun patternTouch(
+        x: Float,
+        y: Float,
+        w: Float,
+        h: Float
+    ) {
+
+        if (!gameStarted) {
+
+            if (y > h * 0.62f) {
+                startPattern()
+            }
+
+            return
+        }
+
+        if (gameOver) {
+
+            if (y > h * 0.58f) {
+                startPattern()
+            }
+
+            return
+        }
+
+        if (patternShowing) {
+            return
+        }
+
+        val size = min(w * 0.76f, 320f)
+        val left = (w - size) / 2f
+        val top = h * 0.26f
+        val cell = size / 3f
+
+        for (i in 0 until 9) {
+
+            val row = i / 3
+            val col = i % 3
+
+            val l = left + col * cell + 5f
+            val t = top + row * cell + 5f
+            val r = left + (col + 1) * cell - 5f
+            val b = top + (row + 1) * cell - 5f
+
+            if (
+                x >= l &&
+                x <= r &&
+                y >= t &&
+                y <= b
+            ) {
+
+                patternSelected[i] =
+                    !patternSelected[i]
+
+                return
+            }
+        }
+
+        if (y > h * 0.74f) {
+            checkPattern()
+        }
+    }
+
+    private fun startPattern() {
+
+        gameStarted = true
+        gameOver = false
+        gameScore = 0
+        gameRound = 1
+
+        pattern =
+            BooleanArray(9)
+
+        patternSelected =
+            BooleanArray(9)
+
+        val count =
+            min(2 + gameRound, 5)
+
+        val indexes =
+            (0..8).shuffled()
+
+        for (i in 0 until count) {
+            pattern[indexes[i]] = true
+        }
+
+        patternShowing = true
+
+        patternShowUntil =
+            System.currentTimeMillis() +
+                1800L
+    }
+
+    private fun checkPattern() {
+
+        var correct = true
+
+        for (i in 0 until 9) {
+
+            if (
+                pattern[i] !=
+                patternSelected[i]
+            ) {
+                correct = false
+                break
+            }
+        }
+
+        if (correct) {
+
+            gameScore++
+            gameRound++
+
+            score += 15
+            save()
+
+            showMessage(
+                "Pattern matched! +15 XP"
+            )
+
+            if (gameRound > 5) {
+
+                gameOver = true
+
+                saveScore(40)
+
+            } else {
+
+                pattern =
+                    BooleanArray(9)
+
+                patternSelected =
+                    BooleanArray(9)
+
+                val count =
+                    min(2 + gameRound, 7)
+
+                val indexes =
+                    (0..8).shuffled()
+
+                for (i in 0 until count) {
+                    pattern[indexes[i]] = true
+                }
+
+                patternShowing = true
+
+                patternShowUntil =
+                    System.currentTimeMillis() +
+                        maxOf(
+                            900L,
+                            1900L -
+                                gameRound * 180L
+                        )
+            }
+
+        } else {
+
+            showMessage(
+                "Pattern didn't match"
+            )
+
+            patternSelected =
+                BooleanArray(9)
         }
     }
 
@@ -2910,83 +3212,67 @@ private class MindBlowView(context: Context) : View(context) {
         h: Float
     ) {
 
-        if (y < 75f) {
+        if (!gameStarted) {
 
-            screen = Screen.GAMES
+            if (y > h * 0.62f) {
+
+                gameStarted = true
+                gameOver = false
+
+                calmCycles = 0
+                calmPhase = 0
+
+                calmPhaseStarted =
+                    System.currentTimeMillis()
+            }
+
             return
         }
 
-        if (!calmRunning) {
+        if (gameOver) {
 
-            if (y in 360f..455f) {
+            if (y > h * 0.58f) {
 
-                calmRunning = true
-                calmStart =
-                    SystemClock.uptimeMillis()
+                gameStarted = true
+                gameOver = false
 
-                calmSeconds = 0
-                calmPhase = "BREATHE IN"
-            }
+                calmCycles = 0
+                calmPhase = 0
 
-        } else {
-
-            if (y in 360f..455f) {
-
-                calmRunning = false
-
-                toast(
-                    "Nice reset. Come back anytime."
-                )
+                calmPhaseStarted =
+                    System.currentTimeMillis()
             }
         }
     }
 
-    private fun startCalm() {
-
-        screen = Screen.CALM
-
-        calmRunning = false
-        calmSeconds = 0
-        calmPhase = "READY"
-    }
-
     // =========================================================
-    // DAILY TOUCH
+    // START GAME
     // =========================================================
 
-    private fun dailyTouch(
-        x: Float,
-        y: Float,
-        w: Float,
-        h: Float
+    private fun startGame(
+        game: GameType
     ) {
 
-        if (y < 75f) {
+        selectedGame = game
 
-            screen = Screen.HOME
-            return
-        }
+        gameStarted = false
+        gameOver = false
+        gameScore = 0
+        gameRound = 1
 
-        if (y in 220f..285f) {
+        numberInput = ""
 
-            startFocus()
-        }
-    }
+        reactionState = 0
 
-    // =========================================================
-    // PROFILE TOUCH
-    // =========================================================
+        colorRunning = false
 
-    private fun profileTouch(
-        x: Float,
-        y: Float,
-        w: Float,
-        h: Float
-    ) {
+        patternShowing = false
 
-        if (y < 75f) {
-            screen = Screen.HOME
-        }
+        calmCycles = 0
+
+        screen = Screen.GAME
+
+        invalidate()
     }
 
     // =========================================================
@@ -2999,6 +3285,14 @@ private class MindBlowView(context: Context) : View(context) {
             .putInt("score", score)
             .putInt("streak", streak)
             .apply()
+    }
+
+    private fun saveScore(amount: Int) {
+
+        if (amount > 0) {
+            score += amount
+            save()
+        }
     }
 
     // =========================================================
@@ -3021,27 +3315,23 @@ private class MindBlowView(context: Context) : View(context) {
                 return false
             }
 
-            Screen.GAMES,
-            Screen.DAILY,
+            Screen.GAMES -> {
+                screen = Screen.HOME
+                invalidate()
+                return true
+            }
+
+            Screen.GAME -> {
+                screen = Screen.GAMES
+                invalidate()
+                return true
+            }
+
             Screen.PROFILE -> {
                 screen = Screen.HOME
-            }
-
-            Screen.FOCUS,
-            Screen.COLOR,
-            Screen.MEMORY,
-            Screen.NUMBER,
-            Screen.CALM -> {
-                screen = Screen.GAMES
+                invalidate()
+                return true
             }
         }
-
-        focusStarted = false
-        calmRunning = false
-        numberRunning = false
-
-        invalidate()
-
-        return true
     }
 }

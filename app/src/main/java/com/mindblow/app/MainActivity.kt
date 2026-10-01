@@ -3,20 +3,24 @@ package com.mindblow.app
 import android.app.Activity
 import android.content.Context
 import android.graphics.*
-import android.media.MediaPlayer
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.Build
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.random.Random
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : Activity() {
 
-    private lateinit var view: MindBlowView
+    private lateinit var mindView: MindBlowView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -24,134 +28,142 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.rgb(5, 7, 24)
         window.navigationBarColor = Color.rgb(5, 7, 24)
 
-        view = MindBlowView(this)
-        setContentView(view)
+        mindView = MindBlowView(this)
+        setContentView(mindView)
+    }
+
+    override fun onDestroy() {
+        mindView.releaseMusic()
+        super.onDestroy()
     }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (!view.goBack()) {
+        if (!mindView.goBack()) {
             super.onBackPressed()
         }
-    }
-
-    override fun onDestroy() {
-        view.releaseMusic()
-        super.onDestroy()
     }
 }
 
 private enum class Screen {
-    WELCOME,
     HOME,
     GAMES,
-    PUZZLE,
+    MUSIC,
+    PROFILE,
+    GAME
+}
+
+private enum class GameType {
+    PULSE,
+    COLOR,
     MEMORY,
+    NUMBER,
     REACTION,
-    COLORS,
-    NUMBERS,
-    BREATHE,
-    MUSIC
+    BREATH
 }
 
 private class MindBlowView(
     private val ctx: Context
 ) : View(ctx) {
 
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val prefs =
-        ctx.getSharedPreferences("mindblow", Context.MODE_PRIVATE)
+        ctx.getSharedPreferences("mindblow_v2", Context.MODE_PRIVATE)
 
-    private val handler = Handler(Looper.getMainLooper())
-
-    private var screen =
-        if (prefs.getBoolean("started", false)) {
-            Screen.HOME
-        } else {
-            Screen.WELCOME
-        }
-
-    private var time = 0f
+    private var screen = Screen.HOME
+    private var selectedGame = GameType.PULSE
 
     private var score = prefs.getInt("score", 0)
     private var streak = prefs.getInt("streak", 0)
 
-    private var toastText = ""
-    private var toastUntil = 0L
+    private var animation = 0f
+    private var message = ""
+    private var messageUntil = 0L
 
-    // Music
-    private var mediaPlayer: MediaPlayer? = null
-    private var musicPlaying = false
+    private val vibrator =
+        ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
 
-    // Puzzle
-    private var puzzleTarget = Random.nextInt(16)
+    // ---------------------------------------------------------
+    // MUSIC
+    // ---------------------------------------------------------
+
+    private var musicOn = prefs.getBoolean("music", false)
+    private var ambientMusic: AmbientMusic? = null
+
+    // ---------------------------------------------------------
+    // GAME STATE
+    // ---------------------------------------------------------
+
+    private var gameStarted = false
+    private var gameScore = 0
+
+    // Pulse Hunt
+    private var pulseX = 0f
+    private var pulseY = 0f
+    private var pulseRadius = 45f
+    private var pulseRound = 0
+
+    // Color Match
+    private var colorCorrect = 0
+    private var colorOptions = IntArray(4)
+    private var colorTarget = 0
 
     // Memory
-    private val memorySymbols = arrayOf(
-        "★", "◆", "●",
-        "✦", "☀", "☾",
-        "✿", "❖", "♣"
-    )
+    private var memoryPattern = mutableListOf<Int>()
+    private var memoryUser = mutableListOf<Int>()
+    private var memoryShowing = true
+    private var memoryShowUntil = 0L
+    private var memoryLevel = 1
 
-    private var memoryBoard =
-        MutableList(9) { it }.apply { shuffle() }
-
-    private var memoryFirst = -1
-    private var memorySecond = -1
-    private var memoryPreview = false
+    // Number Flow
+    private var numberPositions = Array(9) { PointF() }
+    private var nextNumber = 1
+    private var numberStart = 0L
 
     // Reaction
     private var reactionReady = false
-    private var reactionStart = 0L
-    private var reactionWaiting = false
+    private var reactionStartedAt = 0L
+    private var reactionMessage = "WAIT..."
+    private var reactionDelayUntil = 0L
 
-    // Color
-    private var colorCorrect = 0
-    private var colorRound = 0
-
-    // Number
-    private var numberSequence = ""
-    private var numberInput = ""
-    private var numberRound = 1
-    private var showingNumber = false
-
-    // Breathing
-    private var breathStart = 0L
+    // Breath
+    private var breathRunning = false
+    private var breathStartedAt = 0L
 
     init {
         isFocusable = true
-        startAnimation()
-    }
 
-    private fun startAnimation() {
+        if (musicOn) {
+            startMusic()
+        }
+
         postInvalidateDelayed(16L)
     }
 
-    override fun onDraw(c: Canvas) {
-        super.onDraw(c)
+    // =========================================================
+    // DRAW
+    // =========================================================
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
 
         val w = width.toFloat()
         val h = height.toFloat()
 
-        time += 0.018f
+        animation += 0.018f
 
-        drawBackground(c, w, h)
+        drawBackground(canvas, w, h)
 
         when (screen) {
-            Screen.WELCOME -> drawWelcome(c, w, h)
-            Screen.HOME -> drawHome(c, w, h)
-            Screen.GAMES -> drawGames(c, w, h)
-            Screen.PUZZLE -> drawPuzzle(c, w, h)
-            Screen.MEMORY -> drawMemory(c, w, h)
-            Screen.REACTION -> drawReaction(c, w, h)
-            Screen.COLORS -> drawColors(c, w, h)
-            Screen.NUMBERS -> drawNumbers(c, w, h)
-            Screen.BREATHE -> drawBreathe(c, w, h)
-            Screen.MUSIC -> drawMusic(c, w, h)
+            Screen.HOME -> drawHome(canvas, w, h)
+            Screen.GAMES -> drawGames(canvas, w, h)
+            Screen.MUSIC -> drawMusic(canvas, w, h)
+            Screen.PROFILE -> drawProfile(canvas, w, h)
+            Screen.GAME -> drawGame(canvas, w, h)
         }
 
-        if (toastUntil > System.currentTimeMillis()) {
-            drawToast(c, w, h)
+        if (messageUntil > System.currentTimeMillis()) {
+            drawToast(canvas, w, h)
         }
 
         postInvalidateDelayed(16L)
@@ -161,61 +173,94 @@ private class MindBlowView(
     // BACKGROUND
     // =========================================================
 
-    private fun drawBackground(c: Canvas, w: Float, h: Float) {
-
-        p.shader = LinearGradient(
+    private fun drawBackground(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        paint.shader = LinearGradient(
             0f,
             0f,
             w,
             h,
-            Color.rgb(4, 7, 28),
-            Color.rgb(31, 8, 58),
+            Color.rgb(4, 7, 27),
+            Color.rgb(38, 7, 62),
             Shader.TileMode.CLAMP
         )
 
-        c.drawRect(0f, 0f, w, h, p)
-        p.shader = null
+        canvas.drawRect(0f, 0f, w, h, paint)
+        paint.shader = null
 
-        val t = time
+        val t = animation
 
-        p.color = Color.argb(45, 0, 220, 255)
-        c.drawCircle(
-            w * 0.16f + sin(t) * 45f,
-            h * 0.20f + cos(t) * 30f,
-            130f,
-            p
+        // Cyan orb
+        paint.color = Color.argb(35, 0, 220, 255)
+
+        canvas.drawCircle(
+            w * 0.12f + sin(t) * 30f,
+            h * 0.22f + cos(t) * 25f,
+            110f,
+            paint
         )
 
-        p.color = Color.argb(35, 170, 70, 255)
-        c.drawCircle(
-            w * 0.85f + cos(t * 0.7f) * 45f,
-            h * 0.38f + sin(t) * 35f,
-            150f,
-            p
+        // Purple orb
+        paint.color = Color.argb(32, 160, 60, 255)
+
+        canvas.drawCircle(
+            w * 0.88f + cos(t * .8f) * 35f,
+            h * 0.42f + sin(t) * 30f,
+            120f,
+            paint
         )
 
-        p.color = Color.argb(28, 20, 255, 180)
-        c.drawCircle(
-            w * 0.50f + sin(t * 0.5f) * 40f,
-            h * 0.80f,
-            160f,
-            p
+        // Blue lower orb
+        paint.color = Color.argb(25, 40, 130, 255)
+
+        canvas.drawCircle(
+            w * .52f + sin(t * .6f) * 35f,
+            h * .82f,
+            115f,
+            paint
         )
 
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = 1f
-        p.color = Color.argb(20, 100, 220, 255)
+        // Center energy rings
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1f
+        paint.color = Color.argb(24, 100, 220, 255)
+
+        val centerX = w / 2f
+        val centerY = h * .54f
 
         for (i in 0 until 7) {
-            c.drawCircle(
-                w / 2f,
-                h * 0.43f,
-                70f + i * 48f + sin(t + i) * 4f,
-                p
+            canvas.drawCircle(
+                centerX,
+                centerY,
+                45f + i * 38f + sin(t + i) * 4f,
+                paint
             )
         }
 
-        p.style = Paint.Style.FILL
+        // stars
+        paint.style = Paint.Style.FILL
+        paint.color = Color.argb(100, 110, 210, 255)
+
+        for (i in 0 until 28) {
+            val sx =
+                ((i * 137) % maxOf(1, width)).toFloat()
+
+            val sy =
+                ((i * 239 + 100) % maxOf(1, height)).toFloat()
+
+            val r =
+                1f + ((i * 7) % 3)
+
+            canvas.drawCircle(
+                sx,
+                sy,
+                r,
+                paint
+            )
+        }
     }
 
     // =========================================================
@@ -223,8 +268,8 @@ private class MindBlowView(
     // =========================================================
 
     private fun text(
-        c: Canvas,
-        s: String,
+        canvas: Canvas,
+        value: String,
         x: Float,
         y: Float,
         size: Float,
@@ -232,15 +277,23 @@ private class MindBlowView(
         bold: Boolean = false,
         align: Paint.Align = Paint.Align.LEFT
     ) {
-        p.shader = null
-        p.color = color
-        p.textSize = size
-        p.textAlign = align
-        p.typeface = Typeface.create(
-            "sans-serif",
-            if (bold) Typeface.BOLD else Typeface.NORMAL
+        paint.shader = null
+        paint.style = Paint.Style.FILL
+        paint.color = color
+        paint.textSize = size
+        paint.textAlign = align
+        paint.typeface =
+            Typeface.create(
+                "sans-serif",
+                if (bold) Typeface.BOLD else Typeface.NORMAL
+            )
+
+        canvas.drawText(
+            value,
+            x,
+            y,
+            paint
         )
-        c.drawText(s, x, y, p)
     }
 
     // =========================================================
@@ -248,57 +301,94 @@ private class MindBlowView(
     // =========================================================
 
     private fun card(
-        c: Canvas,
+        canvas: Canvas,
         l: Float,
         t: Float,
         r: Float,
         b: Float,
         radius: Float = 20f
     ) {
-        p.shader = null
-        p.color = Color.argb(230, 12, 18, 45)
-        c.drawRoundRect(l, t, r, b, radius, radius, p)
+        paint.shader = null
+        paint.style = Paint.Style.FILL
+        paint.color = Color.argb(
+            232,
+            10,
+            17,
+            43
+        )
 
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = 1.2f
-        p.color = Color.argb(65, 80, 180, 255)
-        c.drawRoundRect(l, t, r, b, radius, radius, p)
+        canvas.drawRoundRect(
+            l,
+            t,
+            r,
+            b,
+            radius,
+            radius,
+            paint
+        )
 
-        p.style = Paint.Style.FILL
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.2f
+        paint.color = Color.argb(
+            65,
+            95,
+            150,
+            230
+        )
+
+        canvas.drawRoundRect(
+            l,
+            t,
+            r,
+            b,
+            radius,
+            radius,
+            paint
+        )
+
+        paint.style = Paint.Style.FILL
     }
 
     // =========================================================
-    // BUTTON
+    // GRADIENT BUTTON
     // =========================================================
 
     private fun button(
-        c: Canvas,
+        canvas: Canvas,
         label: String,
         l: Float,
         t: Float,
         r: Float,
         b: Float
     ) {
-        p.shader = LinearGradient(
+        paint.shader = LinearGradient(
             l,
             t,
             r,
             b,
-            Color.rgb(25, 215, 255),
-            Color.rgb(135, 65, 255),
+            Color.rgb(20, 215, 255),
+            Color.rgb(130, 60, 255),
             Shader.TileMode.CLAMP
         )
 
-        c.drawRoundRect(l, t, r, b, 18f, 18f, p)
+        canvas.drawRoundRect(
+            l,
+            t,
+            r,
+            b,
+            17f,
+            17f,
+            paint
+        )
 
-        p.shader = null
+        paint.shader = null
 
         text(
-            c,
+            canvas,
             label,
             (l + r) / 2f,
-            (t + b) / 2f + 6f,
-            15f,
+            (t + b) / 2f + 5f,
+            13f,
             Color.WHITE,
             true,
             Paint.Align.CENTER
@@ -306,132 +396,165 @@ private class MindBlowView(
     }
 
     // =========================================================
-    // HEADER
+    // LARGE ICON
     // =========================================================
 
-    private fun header(
-        c: Canvas,
-        title: String,
-        subtitle: String
+    private fun icon(
+        canvas: Canvas,
+        type: GameType,
+        cx: Float,
+        cy: Float,
+        size: Float
     ) {
-        text(c, "‹", 20f, 48f, 40f)
-        text(c, title, 58f, 40f, 23f, Color.WHITE, true)
-        text(c, subtitle, 58f, 62f, 11f, 0xff9ba8d0.toInt())
-    }
+        paint.style = Paint.Style.FILL
 
-    // =========================================================
-    // BOTTOM NAV
-    // =========================================================
+        when (type) {
 
-    private fun navigation(
-        c: Canvas,
-        w: Float,
-        h: Float,
-        selected: Int
-    ) {
-        val top = h - 78f
+            GameType.PULSE -> {
+                paint.color = 0xff45e7ff.toInt()
 
-        card(c, 10f, top, w - 10f, h - 8f, 22f)
+                canvas.drawCircle(
+                    cx,
+                    cy,
+                    size * .35f,
+                    paint
+                )
 
-        val icons = arrayOf("⌂", "◆", "♫", "★")
-        val labels = arrayOf("Home", "Games", "Music", "Profile")
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 4f
 
-        for (i in 0..3) {
+                canvas.drawCircle(
+                    cx,
+                    cy,
+                    size * .65f,
+                    paint
+                )
 
-            val x = w * (i + 0.5f) / 4f
+                paint.style = Paint.Style.FILL
+            }
 
-            val color =
-                if (i == selected) {
-                    0xff5ce8ff.toInt()
-                } else {
-                    0xff7885aa.toInt()
+            GameType.COLOR -> {
+                val colors = intArrayOf(
+                    0xffff5577.toInt(),
+                    0xff55ddff.toInt(),
+                    0xffffd34d.toInt(),
+                    0xff9c6cff.toInt()
+                )
+
+                for (i in 0 until 4) {
+                    paint.color = colors[i]
+
+                    val a = i * Math.PI / 2.0
+
+                    canvas.drawCircle(
+                        cx + cos(a).toFloat() * size * .38f,
+                        cy + sin(a).toFloat() * size * .38f,
+                        size * .22f,
+                        paint
+                    )
                 }
+            }
 
-            text(
-                c,
-                icons[i],
-                x,
-                top + 30f,
-                22f,
-                color,
-                true,
-                Paint.Align.CENTER
-            )
+            GameType.MEMORY -> {
+                paint.color = 0xff58e5ff.toInt()
 
-            text(
-                c,
-                labels[i],
-                x,
-                top + 51f,
-                9f,
-                color,
-                false,
-                Paint.Align.CENTER
-            )
+                for (row in 0 until 2) {
+                    for (col in 0 until 2) {
+                        val x =
+                            cx + (col - .5f) * size * .55f
+
+                        val y =
+                            cy + (row - .5f) * size * .55f
+
+                        canvas.drawRoundRect(
+                            x - size * .16f,
+                            y - size * .16f,
+                            x + size * .16f,
+                            y + size * .16f,
+                            7f,
+                            7f,
+                            paint
+                        )
+                    }
+                }
+            }
+
+            GameType.NUMBER -> {
+                text(
+                    canvas,
+                    "123",
+                    cx,
+                    cy + size * .18f,
+                    size * .55f,
+                    0xff59e5ff.toInt(),
+                    true,
+                    Paint.Align.CENTER
+                )
+            }
+
+            GameType.REACTION -> {
+                paint.color = 0xffffd34d.toInt()
+
+                val path = Path()
+
+                path.moveTo(
+                    cx - size * .1f,
+                    cy - size * .6f
+                )
+
+                path.lineTo(
+                    cx + size * .18f,
+                    cy - size * .1f
+                )
+
+                path.lineTo(
+                    cx - size * .02f,
+                    cy - size * .1f
+                )
+
+                path.lineTo(
+                    cx + size * .05f,
+                    cy + size * .58f
+                )
+
+                path.lineTo(
+                    cx - size * .22f,
+                    cy + size * .08f
+                )
+
+                path.lineTo(
+                    cx - size * .03f,
+                    cy + size * .08f
+                )
+
+                path.close()
+
+                canvas.drawPath(path, paint)
+            }
+
+            GameType.BREATH -> {
+                paint.color = 0xff65e7c5.toInt()
+
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = 5f
+
+                canvas.drawCircle(
+                    cx,
+                    cy,
+                    size * .45f,
+                    paint
+                )
+
+                canvas.drawCircle(
+                    cx,
+                    cy,
+                    size * .68f,
+                    paint
+                )
+
+                paint.style = Paint.Style.FILL
+            }
         }
-    }
-
-    // =========================================================
-    // WELCOME
-    // =========================================================
-
-    private fun drawWelcome(
-        c: Canvas,
-        w: Float,
-        h: Float
-    ) {
-        text(
-            c,
-            "✦",
-            w / 2f,
-            h * 0.38f,
-            82f,
-            0xff62e8ff.toInt(),
-            true,
-            Paint.Align.CENTER
-        )
-
-        text(
-            c,
-            "MINDBLOW",
-            w / 2f,
-            h * 0.49f,
-            38f,
-            Color.WHITE,
-            true,
-            Paint.Align.CENTER
-        )
-
-        text(
-            c,
-            "RESET • FOCUS • REFRESH",
-            w / 2f,
-            h * 0.55f,
-            12f,
-            0xffaeb9dc.toInt(),
-            false,
-            Paint.Align.CENTER
-        )
-
-        text(
-            c,
-            "Six tiny challenges for your mind.",
-            w / 2f,
-            h * 0.63f,
-            16f,
-            Color.WHITE,
-            true,
-            Paint.Align.CENTER
-        )
-
-        button(
-            c,
-            "START MINDBLOW",
-            w * .14f,
-            h * .74f,
-            w * .86f,
-            h * .83f
-        )
     }
 
     // =========================================================
@@ -439,104 +562,273 @@ private class MindBlowView(
     // =========================================================
 
     private fun drawHome(
-        c: Canvas,
+        canvas: Canvas,
         w: Float,
         h: Float
     ) {
-        text(c, "MindBlow", 20f, 40f, 28f, Color.WHITE, true)
-
         text(
-            c,
-            "Your daily mental reset",
-            20f,
-            62f,
-            12f,
-            0xff9ca8cc.toInt()
+            canvas,
+            "MindBlow",
+            18f,
+            38f,
+            27f,
+            Color.WHITE,
+            true
         )
 
-        card(c, w - 125f, 17f, w - 18f, 58f, 17f)
+        text(
+            canvas,
+            "RELAX • FOCUS • REFRESH",
+            19f,
+            57f,
+            9f,
+            0xff8996be.toInt()
+        )
+
+        // XP pill
+        card(
+            canvas,
+            w - 94f,
+            15f,
+            w - 14f,
+            50f,
+            18f
+        )
 
         text(
-            c,
-            "✦ $score",
-            w - 71f,
-            43f,
-            15f,
-            0xffffd66b.toInt(),
+            canvas,
+            "✦ $score XP",
+            w - 54f,
+            38f,
+            11f,
+            0xffffd96a.toInt(),
             true,
             Paint.Align.CENTER
         )
 
-        card(c, 18f, 82f, w - 18f, 178f, 23f)
-
-        text(c, "READY FOR A RESET?", 34f, 112f, 11f, 0xff5ce7ff.toInt(), true)
-
-        text(
-            c,
-            "Refresh your mind.",
-            34f,
-            143f,
-            23f,
-            Color.WHITE,
-            true
-        )
-
-        text(
-            c,
-            "Pick a challenge below.",
-            34f,
-            163f,
+        // Hero
+        card(
+            canvas,
             12f,
-            0xffaab5d6.toInt()
+            76f,
+            w - 12f,
+            175f,
+            22f
         )
 
         text(
-            c,
-            "6 GAMES",
-            w - 42f,
-            112f,
-            11f,
-            0xffaeb9d8.toInt(),
-            true,
-            Paint.Align.RIGHT
+            canvas,
+            "READY FOR A RESET?",
+            25f,
+            101f,
+            9f,
+            0xff62e6ff.toInt(),
+            true
         )
 
         text(
-            c,
-            "STREAK $streak",
-            w - 42f,
-            135f,
-            11f,
-            0xffffbd45.toInt(),
-            true,
-            Paint.Align.RIGHT
-        )
-
-        text(
-            c,
-            "Mind Refreshing Games",
-            20f,
-            214f,
-            19f,
+            canvas,
+            "Refresh your mind.",
+            25f,
+            128f,
+            22f,
             Color.WHITE,
             true
         )
 
-        gameCard(c, "✦", "Puzzle", "Find the glow", 18f, 230f, w / 2f - 8f, 325f)
-        gameCard(c, "◉", "Memory", "Train recall", w / 2f + 8f, 230f, w - 18f, 325f)
+        text(
+            canvas,
+            "Pick a challenge and take a tiny break.",
+            25f,
+            149f,
+            10f,
+            0xffa4afd0.toInt()
+        )
 
-        gameCard(c, "⚡", "Reaction", "React fast", 18f, 335f, w / 2f - 8f, 430f)
-        gameCard(c, "●", "Colors", "Spot the odd one", w / 2f + 8f, 335f, w - 18f, 430f)
+        button(
+            canvas,
+            "START A QUICK RESET",
+            25f,
+            158f,
+            w - 25f,
+            178f
+        )
 
-        gameCard(c, "123", "Number Flow", "Remember digits", 18f, 440f, w / 2f - 8f, 535f)
-        gameCard(c, "◌", "Breathe", "Calm your mind", w / 2f + 8f, 440f, w - 18f, 535f)
+        // Music card
+        text(
+            canvas,
+            "MIND REFRESHING MUSIC",
+            16f,
+            205f,
+            10f,
+            0xff8cecff.toInt(),
+            true
+        )
 
-        navigation(c, w, h, 0)
+        card(
+            canvas,
+            12f,
+            214f,
+            w - 12f,
+            270f,
+            18f
+        )
+
+        iconMusic(
+            canvas,
+            34f,
+            242f,
+            20f
+        )
+
+        text(
+            canvas,
+            "Mind Refreshing Music",
+            60f,
+            237f,
+            13f,
+            Color.WHITE,
+            true
+        )
+
+        text(
+            canvas,
+            if (musicOn)
+                "Ambient sound is playing"
+            else
+                "Tap to start calming ambience",
+            60f,
+            253f,
+            9f,
+            0xff909cc0.toInt()
+        )
+
+        val musicColor =
+            if (musicOn)
+                0xff55e5ff.toInt()
+            else
+                0xff687393.toInt()
+
+        paint.color = musicColor
+
+        canvas.drawRoundRect(
+            w - 100f,
+            230f,
+            w - 25f,
+            257f,
+            14f,
+            14f,
+            paint
+        )
+
+        text(
+            canvas,
+            if (musicOn) "MUSIC ON" else "MUSIC OFF",
+            w - 62f,
+            248f,
+            9f,
+            Color.WHITE,
+            true,
+            Paint.Align.CENTER
+        )
+
+        // Games
+        text(
+            canvas,
+            "MIND REFRESHING GAMES",
+            16f,
+            300f,
+            15f,
+            Color.WHITE,
+            true
+        )
+
+        val gap = 9f
+        val left = 12f
+        val right = w - 12f
+        val mid = w / 2f
+
+        gameTile(
+            canvas,
+            GameType.PULSE,
+            "Pulse Hunt",
+            "Find the moving glow",
+            left,
+            315f,
+            mid - gap,
+            412f
+        )
+
+        gameTile(
+            canvas,
+            GameType.MEMORY,
+            "Memory Matrix",
+            "Remember the pattern",
+            mid + gap,
+            315f,
+            right,
+            412f
+        )
+
+        gameTile(
+            canvas,
+            GameType.REACTION,
+            "Quick Reaction",
+            "React as fast as possible",
+            left,
+            421f,
+            mid - gap,
+            518f
+        )
+
+        gameTile(
+            canvas,
+            GameType.COLOR,
+            "Color Match",
+            "Spot the matching color",
+            mid + gap,
+            421f,
+            right,
+            518f
+        )
+
+        gameTile(
+            canvas,
+            GameType.NUMBER,
+            "Number Flow",
+            "Tap numbers in order",
+            left,
+            527f,
+            mid - gap,
+            624f
+        )
+
+        gameTile(
+            canvas,
+            GameType.BREATH,
+            "Zen Breath",
+            "Slow down and breathe",
+            mid + gap,
+            527f,
+            right,
+            624f
+        )
+
+        drawNavigation(
+            canvas,
+            w,
+            h,
+            0
+        )
     }
 
-    private fun gameCard(
-        c: Canvas,
-        icon: String,
+    // =========================================================
+    // GAME TILE
+    // =========================================================
+
+    private fun gameTile(
+        canvas: Canvas,
+        type: GameType,
         title: String,
         subtitle: String,
         l: Float,
@@ -544,454 +836,217 @@ private class MindBlowView(
         r: Float,
         b: Float
     ) {
-        card(c, l, t, r, b, 19f)
-
-        text(
-            c,
-            icon,
-            l + 35f,
-            t + 42f,
-            23f,
-            0xff5ce7ff.toInt(),
-            true,
-            Paint.Align.CENTER
+        card(
+            canvas,
+            l,
+            t,
+            r,
+            b,
+            18f
         )
 
-        text(c, title, l + 17f, t + 68f, 15f, Color.WHITE, true)
-        text(c, subtitle, l + 17f, t + 86f, 10f, 0xff9da8cc.toInt())
-    }
-
-    // =========================================================
-    // GAMES
-    // =========================================================
-
-    private fun drawGames(
-        c: Canvas,
-        w: Float,
-        h: Float
-    ) {
-        header(c, "Mind Games", "Choose a quick challenge")
-
-        gameCard(c, "✦", "Puzzle", "Find the glow", 18f, 90f, w / 2f - 8f, 185f)
-        gameCard(c, "◉", "Memory", "Train recall", w / 2f + 8f, 90f, w - 18f, 185f)
-
-        gameCard(c, "⚡", "Reaction", "React fast", 18f, 198f, w / 2f - 8f, 293f)
-        gameCard(c, "●", "Colors", "Spot odd color", w / 2f + 8f, 198f, w - 18f, 293f)
-
-        gameCard(c, "123", "Number Flow", "Remember digits", 18f, 306f, w / 2f - 8f, 401f)
-        gameCard(c, "◌", "Breathe", "Slow your mind", w / 2f + 8f, 306f, w - 18f, 401f)
-
-        card(c, 18f, 418f, w - 18f, 488f, 20f)
+        icon(
+            canvas,
+            type,
+            l + 38f,
+            t + 36f,
+            34f
+        )
 
         text(
-            c,
-            "Each game gives XP",
-            34f,
-            449f,
-            15f,
+            canvas,
+            title,
+            l + 70f,
+            t + 35f,
+            13f,
             Color.WHITE,
             true
         )
 
         text(
-            c,
-            "Play • relax • improve your score",
-            34f,
-            472f,
-            11f,
-            0xff9faace.toInt()
+            canvas,
+            subtitle,
+            l + 70f,
+            t + 54f,
+            9f,
+            0xff8f9abd.toInt()
         )
 
-        navigation(c, w, h, 1)
-    }
-
-    // =========================================================
-    // PUZZLE
-    // =========================================================
-
-    private fun drawPuzzle(
-        c: Canvas,
-        w: Float,
-        h: Float
-    ) {
-        header(c, "Glow Hunt", "Tap the glowing tile")
-
-        val size = min(w * .82f, 330f)
-        val left = (w - size) / 2f
-        val top = 100f
-        val cell = size / 4f
-
-        for (i in 0 until 16) {
-
-            val row = i / 4
-            val col = i % 4
-
-            val l = left + col * cell + 4f
-            val tt = top + row * cell + 4f
-            val r = left + (col + 1) * cell - 4f
-            val b = top + (row + 1) * cell - 4f
-
-            card(c, l, tt, r, b, 12f)
-
-            if (i == puzzleTarget) {
-
-                p.color = 0xff4de8ff.toInt()
-
-                c.drawCircle(
-                    (l + r) / 2f,
-                    (tt + b) / 2f,
-                    16f + sin(time * 4f) * 5f,
-                    p
-                )
-            }
-        }
-
         text(
-            c,
-            "Find it before the glow moves!",
-            w / 2f,
-            top + size + 35f,
-            14f,
-            0xffb5c0df.toInt(),
-            false,
-            Paint.Align.CENTER
-        )
-    }
-
-    // =========================================================
-    // MEMORY
-    // =========================================================
-
-    private fun drawMemory(
-        c: Canvas,
-        w: Float,
-        h: Float
-    ) {
-        header(c, "Memory Matrix", "Remember the symbols")
-
-        val size = min(w * .82f, 320f)
-        val left = (w - size) / 2f
-        val top = 100f
-        val cell = size / 3f
-
-        for (i in 0 until 9) {
-
-            val row = i / 3
-            val col = i % 3
-
-            val l = left + col * cell + 5f
-            val tt = top + row * cell + 5f
-            val r = left + (col + 1) * cell - 5f
-            val b = top + (row + 1) * cell - 5f
-
-            card(c, l, tt, r, b, 15f)
-
-            val revealed =
-                memoryPreview ||
-                i == memoryFirst ||
-                i == memorySecond
-
-            text(
-                c,
-                if (revealed) memorySymbols[memoryBoard[i]] else "?",
-                (l + r) / 2f,
-                (tt + b) / 2f + 11f,
-                28f,
-                0xff62e5ff.toInt(),
-                true,
-                Paint.Align.CENTER
-            )
-        }
-
-        text(
-            c,
-            if (memoryPreview) "MEMORIZE..." else "MATCH TWO CARDS",
-            w / 2f,
-            top + size + 35f,
-            14f,
-            0xffb4bfdf.toInt(),
+            canvas,
+            "PLAY ›",
+            r - 16f,
+            b - 15f,
+            9f,
+            0xff55e5ff.toInt(),
             true,
-            Paint.Align.CENTER
+            Paint.Align.RIGHT
         )
     }
 
     // =========================================================
-    // REACTION
+    // GAMES SCREEN
     // =========================================================
 
-    private fun drawReaction(
-        c: Canvas,
+    private fun drawGames(
+        canvas: Canvas,
         w: Float,
         h: Float
     ) {
-        header(c, "Reaction", "Tap when the circle turns green")
+        topBar(
+            canvas,
+            w,
+            "Mind Games",
+            "Six quick ways to refresh"
+        )
 
-        val cx = w / 2f
-        val cy = 270f
+        val mid = w / 2f
+        val gap = 9f
 
-        if (reactionWaiting) {
+        gameTile(
+            canvas,
+            GameType.PULSE,
+            "Pulse Hunt",
+            "Find the moving glow",
+            12f,
+            90f,
+            mid - gap,
+            185f
+        )
 
-            p.color = 0xffff4f68.toInt()
+        gameTile(
+            canvas,
+            GameType.MEMORY,
+            "Memory Matrix",
+            "Remember the pattern",
+            mid + gap,
+            90f,
+            w - 12f,
+            185f
+        )
 
-            c.drawCircle(cx, cy, 105f + sin(time * 3f) * 5f, p)
+        gameTile(
+            canvas,
+            GameType.REACTION,
+            "Quick Reaction",
+            "React as fast as possible",
+            12f,
+            195f,
+            mid - gap,
+            290f
+        )
 
-            text(
-                c,
-                "WAIT...",
-                cx,
-                cy + 9f,
-                25f,
-                Color.WHITE,
-                true,
-                Paint.Align.CENTER
-            )
+        gameTile(
+            canvas,
+            GameType.COLOR,
+            "Color Match",
+            "Spot the matching color",
+            mid + gap,
+            195f,
+            w - 12f,
+            290f
+        )
 
-        } else if (reactionReady) {
+        gameTile(
+            canvas,
+            GameType.NUMBER,
+            "Number Flow",
+            "Tap numbers in order",
+            12f,
+            300f,
+            mid - gap,
+            395f
+        )
 
-            p.color = 0xff46f5a1.toInt()
-            c.drawCircle(cx, cy, 115f + sin(time * 4f) * 7f, p)
+        gameTile(
+            canvas,
+            GameType.BREATH,
+            "Zen Breath",
+            "Slow down and breathe",
+            mid + gap,
+            300f,
+            w - 12f,
+            395f
+        )
 
-            text(
-                c,
-                "TAP!",
-                cx,
-                cy + 10f,
-                28f,
-                Color.WHITE,
-                true,
-                Paint.Align.CENTER
-            )
-
-        } else {
-
-            p.color = 0xff5be5ff.toInt()
-            c.drawCircle(cx, cy, 100f, p)
-
-            text(
-                c,
-                "START",
-                cx,
-                cy + 9f,
-                23f,
-                Color.WHITE,
-                true,
-                Paint.Align.CENTER
-            )
-        }
+        card(
+            canvas,
+            12f,
+            415f,
+            w - 12f,
+            490f,
+            20f
+        )
 
         text(
-            c,
-            "Fast reactions earn +20 XP",
-            cx,
-            430f,
+            canvas,
+            "TODAY'S RESET",
+            28f,
+            443f,
+            9f,
+            0xff60e5ff.toInt(),
+            true
+        )
+
+        text(
+            canvas,
+            "Play any game for 2 minutes.",
+            28f,
+            465f,
             14f,
-            0xffaeb9d9.toInt(),
-            false,
-            Paint.Align.CENTER
+            Color.WHITE,
+            true
+        )
+
+        drawNavigation(
+            canvas,
+            w,
+            h,
+            1
         )
     }
 
     // =========================================================
-    // COLORS
+    // MUSIC SCREEN
     // =========================================================
 
-    private fun drawColors(
-        c: Canvas,
+    private fun drawMusic(
+        canvas: Canvas,
         w: Float,
         h: Float
     ) {
-        header(c, "Color Focus", "Find the different tile")
-
-        val colors = intArrayOf(
-            Color.rgb(55, 220, 255),
-            Color.rgb(255, 75, 145),
-            Color.rgb(155, 85, 255),
-            Color.rgb(75, 240, 160)
+        topBar(
+            canvas,
+            w,
+            "Mind Music",
+            "Calming sounds for your reset"
         )
 
-        val correct = colorCorrect % 4
-        val odd = (colorRound + 1) % 9
-
-        val size = min(w * .82f, 320f)
-        val left = (w - size) / 2f
-        val top = 115f
-        val cell = size / 3f
-
-        for (i in 0 until 9) {
-
-            val row = i / 3
-            val col = i % 3
-
-            val l = left + col * cell + 6f
-            val tt = top + row * cell + 6f
-            val r = left + (col + 1) * cell - 6f
-            val b = top + (row + 1) * cell - 6f
-
-            val colorIndex = correct
-
-            p.color =
-                if (i == odd) {
-                    colors[colorIndex].let {
-                        Color.rgb(
-                            min(255, Color.red(it) + 55),
-                            min(255, Color.green(it) + 25),
-                            min(255, Color.blue(it) + 25)
-                        )
-                    }
-                } else {
-                    colors[colorIndex]
-                }
-
-            c.drawRoundRect(l, tt, r, b, 18f, 18f, p)
-        }
-
-        text(
-            c,
-            "Round ${colorRound + 1}",
-            w / 2f,
-            top + size + 35f,
+        card(
+            canvas,
             15f,
-            0xffb5c0df.toInt(),
-            true,
-            Paint.Align.CENTER
+            100f,
+            w - 15f,
+            285f,
+            26f
         )
-    }
-
-    // =========================================================
-    // NUMBER FLOW
-    // =========================================================
-
-    private fun drawNumbers(
-        c: Canvas,
-        w: Float,
-        h: Float
-    ) {
-        header(c, "Number Flow", "Remember the sequence")
 
         text(
-            c,
-            "ROUND $numberRound",
+            canvas,
+            "♫",
             w / 2f,
-            125f,
-            13f,
-            0xff5ce7ff.toInt(),
+            165f,
+            65f,
+            0xff63e6ff.toInt(),
             true,
             Paint.Align.CENTER
         )
 
-        if (showingNumber) {
-
-            text(
-                c,
-                numberSequence,
-                w / 2f,
-                235f,
-                38f,
-                Color.WHITE,
-                true,
-                Paint.Align.CENTER
-            )
-
-            text(
-                c,
-                "MEMORIZE",
-                w / 2f,
-                280f,
-                13f,
-                0xffaab7da.toInt(),
-                true,
-                Paint.Align.CENTER
-            )
-
-        } else {
-
-            card(c, 35f, 170f, w - 35f, 245f, 20f)
-
-            text(
-                c,
-                if (numberInput.isEmpty()) "TYPE THE NUMBER" else numberInput,
-                w / 2f,
-                217f,
-                25f,
-                0xff62e5ff.toInt(),
-                true,
-                Paint.Align.CENTER
-            )
-
-            button(
-                c,
-                "CHECK",
-                55f,
-                280f,
-                w - 55f,
-                335f
-            )
-        }
-
-        val buttons = arrayOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "0")
-
-        val bw = (w - 80f) / 3f
-
-        for (i in buttons.indices) {
-
-            val row = i / 3
-            val col = i % 3
-
-            val l = 20f + col * (bw + 10f)
-            val t = 365f + row * 53f
-
-            card(c, l, t, l + bw, t + 46f, 14f)
-
-            text(
-                c,
-                buttons[i],
-                l + bw / 2f,
-                t + 31f,
-                18f,
-                Color.WHITE,
-                true,
-                Paint.Align.CENTER
-            )
-        }
-    }
-
-    // =========================================================
-    // BREATHE
-    // =========================================================
-
-    private fun drawBreathe(
-        c: Canvas,
-        w: Float,
-        h: Float
-    ) {
-        header(c, "Breathe", "A tiny calm moment")
-
-        val elapsed =
-            ((System.currentTimeMillis() - breathStart) % 12000L).toFloat()
-
-        val phase = elapsed / 12000f
-
-        val radius =
-            if (phase < .5f) {
-                65f + phase * 2f * 90f
-            } else {
-                155f - (phase - .5f) * 2f * 90f
-            }
-
-        p.color = Color.argb(35, 80, 220, 255)
-        c.drawCircle(w / 2f, 265f, radius + 35f, p)
-
-        p.color = 0xff57e5ff.toInt()
-        c.drawCircle(w / 2f, 265f, radius, p)
-
-        val instruction =
-            if (phase < .5f) "BREATHE IN" else "BREATHE OUT"
-
         text(
-            c,
-            instruction,
+            canvas,
+            "Ambient Mind Reset",
             w / 2f,
-            272f,
+            205f,
             22f,
             Color.WHITE,
             true,
@@ -999,104 +1054,1073 @@ private class MindBlowView(
         )
 
         text(
-            c,
-            "Follow the circle slowly.",
+            canvas,
+            if (musicOn)
+                "Calming ambience is playing"
+            else
+                "Start your relaxing background sound",
             w / 2f,
-            405f,
-            14f,
-            0xffb0bbda.toInt(),
+            228f,
+            11f,
+            0xffa1acd0.toInt(),
             false,
             Paint.Align.CENTER
         )
 
         button(
-            c,
-            "I FEEL CALMER  +10 XP",
+            canvas,
+            if (musicOn) "TURN MUSIC OFF" else "START MUSIC",
             45f,
-            450f,
+            248f,
             w - 45f,
-            505f
+            290f
+        )
+
+        text(
+            canvas,
+            "PLAY WHILE YOU GAME",
+            18f,
+            335f,
+            11f,
+            0xff63e6ff.toInt(),
+            true
+        )
+
+        musicOption(
+            canvas,
+            "Deep Calm",
+            "Soft ambient tones",
+            355f,
+            0
+        )
+
+        musicOption(
+            canvas,
+            "Night Focus",
+            "Low continuous atmosphere",
+            425f,
+            1
+        )
+
+        musicOption(
+            canvas,
+            "Mind Reset",
+            "Slow relaxing pulse",
+            495f,
+            2
+        )
+
+        drawNavigation(
+            canvas,
+            w,
+            h,
+            2
+        )
+    }
+
+    private fun musicOption(
+        canvas: Canvas,
+        title: String,
+        subtitle: String,
+        y: Float,
+        selected: Int
+    ) {
+        card(
+            canvas,
+            15f,
+            y,
+            width - 15f,
+            y + 58f,
+            17f
+        )
+
+        paint.color =
+            if (selected == 0)
+                0xff55e5ff.toInt()
+            else
+                0xff343c62.toInt()
+
+        canvas.drawCircle(
+            38f,
+            y + 29f,
+            10f,
+            paint
+        )
+
+        text(
+            canvas,
+            title,
+            60f,
+            y + 25f,
+            13f,
+            Color.WHITE,
+            true
+        )
+
+        text(
+            canvas,
+            subtitle,
+            60f,
+            y + 42f,
+            9f,
+            0xff8e9abb.toInt()
         )
     }
 
     // =========================================================
-    // MUSIC
+    // PROFILE
     // =========================================================
 
-    private fun drawMusic(
-        c: Canvas,
+    private fun drawProfile(
+        canvas: Canvas,
         w: Float,
         h: Float
     ) {
-        header(c, "Mind Music", "Relaxing background audio")
+        topBar(
+            canvas,
+            w,
+            "Your Progress",
+            "Your MindBlow journey"
+        )
 
-        card(c, 20f, 100f, w - 20f, 285f, 25f)
+        card(
+            canvas,
+            15f,
+            95f,
+            w - 15f,
+            225f,
+            24f
+        )
 
         text(
-            c,
-            "♫",
-            w / 2f,
-            180f,
-            70f,
-            0xff61e6ff.toInt(),
+            canvas,
+            "✦",
+            65f,
+            170f,
+            55f,
+            0xff61e5ff.toInt(),
             true,
             Paint.Align.CENTER
         )
 
         text(
-            c,
-            "Mind Refreshing",
+            canvas,
+            "Mind Explorer",
+            110f,
+            140f,
+            20f,
+            Color.WHITE,
+            true
+        )
+
+        text(
+            canvas,
+            "Level ${score / 500 + 1}",
+            110f,
+            167f,
+            12f,
+            0xff9aa7c9.toInt()
+        )
+
+        text(
+            canvas,
+            "$score XP",
+            110f,
+            194f,
+            14f,
+            0xffffd76a.toInt(),
+            true
+        )
+
+        statCard(
+            canvas,
+            "XP",
+            score.toString(),
+            15f,
+            250f,
+            w / 3f - 10f,
+            325f
+        )
+
+        statCard(
+            canvas,
+            "STREAK",
+            streak.toString(),
+            w / 3f,
+            250f,
+            w * 2f / 3f - 5f,
+            325f
+        )
+
+        statCard(
+            canvas,
+            "LEVEL",
+            "${score / 500 + 1}",
+            w * 2f / 3f,
+            250f,
+            w - 15f,
+            325f
+        )
+
+        card(
+            canvas,
+            15f,
+            350f,
+            w - 15f,
+            440f,
+            20f
+        )
+
+        text(
+            canvas,
+            "GAME LIBRARY",
+            30f,
+            378f,
+            10f,
+            0xff60e5ff.toInt(),
+            true
+        )
+
+        text(
+            canvas,
+            "6 mind refreshing games",
+            30f,
+            405f,
+            15f,
+            Color.WHITE,
+            true
+        )
+
+        text(
+            canvas,
+            "Music • Score • Streak • Progress",
+            30f,
+            426f,
+            10f,
+            0xff909cbd.toInt()
+        )
+
+        drawNavigation(
+            canvas,
+            w,
+            h,
+            3
+        )
+    }
+
+    private fun statCard(
+        canvas: Canvas,
+        title: String,
+        value: String,
+        l: Float,
+        t: Float,
+        r: Float,
+        b: Float
+    ) {
+        card(
+            canvas,
+            l + 3f,
+            t,
+            r - 3f,
+            b,
+            16f
+        )
+
+        text(
+            canvas,
+            title,
+            (l + r) / 2f,
+            t + 27f,
+            8f,
+            0xff8d9abe.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
+
+        text(
+            canvas,
+            value,
+            (l + r) / 2f,
+            t + 53f,
+            16f,
+            Color.WHITE,
+            true,
+            Paint.Align.CENTER
+        )
+    }
+
+    // =========================================================
+    // TOP BAR
+    // =========================================================
+
+    private fun topBar(
+        canvas: Canvas,
+        w: Float,
+        title: String,
+        subtitle: String
+    ) {
+        text(
+            canvas,
+            "‹",
+            20f,
+            43f,
+            39f,
+            Color.WHITE,
+            false
+        )
+
+        text(
+            canvas,
+            title,
+            57f,
+            37f,
+            23f,
+            Color.WHITE,
+            true
+        )
+
+        text(
+            canvas,
+            subtitle,
+            58f,
+            57f,
+            9f,
+            0xff8f9bbd.toInt()
+        )
+
+        card(
+            canvas,
+            w - 90f,
+            15f,
+            w - 14f,
+            49f,
+            17f
+        )
+
+        text(
+            canvas,
+            "✦ $score",
+            w - 52f,
+            36f,
+            10f,
+            0xffffd86a.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
+    }
+
+    // =========================================================
+    // NAVIGATION
+    // =========================================================
+
+    private fun drawNavigation(
+        canvas: Canvas,
+        w: Float,
+        h: Float,
+        selected: Int
+    ) {
+        val top = h - 74f
+
+        card(
+            canvas,
+            7f,
+            top,
+            w - 7f,
+            h - 8f,
+            20f
+        )
+
+        val labels = arrayOf(
+            "Home",
+            "Games",
+            "Music",
+            "Profile"
+        )
+
+        val icons = arrayOf(
+            "⌂",
+            "◆",
+            "♫",
+            "●"
+        )
+
+        for (i in 0..3) {
+
+            val x =
+                w * (i + .5f) / 4f
+
+            val active =
+                i == selected
+
+            val color =
+                if (active)
+                    0xff5de6ff.toInt()
+                else
+                    0xff727da3.toInt()
+
+            text(
+                canvas,
+                icons[i],
+                x,
+                top + 28f,
+                23f,
+                color,
+                true,
+                Paint.Align.CENTER
+            )
+
+            text(
+                canvas,
+                labels[i],
+                x,
+                top + 50f,
+                8f,
+                color,
+                active,
+                Paint.Align.CENTER
+            )
+        }
+    }
+
+    // =========================================================
+    // GAME SCREEN
+    // =========================================================
+
+    private fun drawGame(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        val title =
+            when (selectedGame) {
+                GameType.PULSE -> "Pulse Hunt"
+                GameType.COLOR -> "Color Match"
+                GameType.MEMORY -> "Memory Matrix"
+                GameType.NUMBER -> "Number Flow"
+                GameType.REACTION -> "Quick Reaction"
+                GameType.BREATH -> "Zen Breath"
+            }
+
+        text(
+            canvas,
+            "‹",
+            20f,
+            48f,
+            40f,
+            Color.WHITE
+        )
+
+        text(
+            canvas,
+            title,
+            58f,
+            40f,
+            22f,
+            Color.WHITE,
+            true
+        )
+
+        text(
+            canvas,
+            "Score  $gameScore",
+            w - 20f,
+            39f,
+            12f,
+            0xffffd66a.toInt(),
+            true,
+            Paint.Align.RIGHT
+        )
+
+        when (selectedGame) {
+            GameType.PULSE -> drawPulseGame(canvas, w, h)
+            GameType.COLOR -> drawColorGame(canvas, w, h)
+            GameType.MEMORY -> drawMemoryGame(canvas, w, h)
+            GameType.NUMBER -> drawNumberGame(canvas, w, h)
+            GameType.REACTION -> drawReactionGame(canvas, w, h)
+            GameType.BREATH -> drawBreathGame(canvas, w, h)
+        }
+    }
+
+    // =========================================================
+    // PULSE HUNT
+    // =========================================================
+
+    private fun drawPulseGame(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        text(
+            canvas,
+            "Find the moving pulse",
             w / 2f,
-            225f,
-            24f,
+            95f,
+            17f,
             Color.WHITE,
             true,
             Paint.Align.CENTER
         )
 
         text(
-            c,
-            if (musicPlaying) "Music is playing" else "Music is paused",
+            canvas,
+            "Tap the glowing circle",
+            w / 2f,
+            119f,
+            11f,
+            0xff99a5c7.toInt(),
+            false,
+            Paint.Align.CENTER
+        )
+
+        if (!gameStarted) {
+            button(
+                canvas,
+                "START PULSE HUNT",
+                45f,
+                h * .42f,
+                w - 45f,
+                h * .42f + 52f
+            )
+            return
+        }
+
+        val areaTop = 150f
+        val areaBottom = h - 120f
+
+        pulseX =
+            w / 2f +
+                    sin(animation * 1.4f) * w * .32f
+
+        pulseY =
+            (areaTop + areaBottom) / 2f +
+                    cos(animation * 1.1f) * 180f
+
+        paint.color = Color.argb(
+            40,
+            50,
+            230,
+            255
+        )
+
+        canvas.drawCircle(
+            pulseX,
+            pulseY,
+            80f + sin(animation * 2f) * 10f,
+            paint
+        )
+
+        paint.color = 0xff50e8ff.toInt()
+
+        canvas.drawCircle(
+            pulseX,
+            pulseY,
+            pulseRadius,
+            paint
+        )
+
+        paint.color = Color.WHITE
+
+        canvas.drawCircle(
+            pulseX - 10f,
+            pulseY - 12f,
+            8f,
+            paint
+        )
+
+        text(
+            canvas,
+            "TAP!",
+            w / 2f,
+            h - 90f,
+            18f,
+            0xff55e5ff.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
+    }
+
+    // =========================================================
+    // COLOR MATCH
+    // =========================================================
+
+    private fun drawColorGame(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        text(
+            canvas,
+            "Which tile matches?",
+            w / 2f,
+            98f,
+            19f,
+            Color.WHITE,
+            true,
+            Paint.Align.CENTER
+        )
+
+        val colors = intArrayOf(
+            0xffff5577.toInt(),
+            0xff55ddff.toInt(),
+            0xffffd34d.toInt(),
+            0xffa66cff.toInt()
+        )
+
+        paint.color = colors[colorTarget]
+
+        canvas.drawRoundRect(
+            w / 2f - 48f,
+            125f,
+            w / 2f + 48f,
+            221f,
+            25f,
+            25f,
+            paint
+        )
+
+        text(
+            canvas,
+            "MATCH",
             w / 2f,
             250f,
+            10f,
+            0xff8e9abc.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
+
+        for (i in 0 until 4) {
+
+            val row = i / 2
+            val col = i % 2
+
+            val l =
+                25f + col * (w - 75f) / 2f
+
+            val t =
+                275f + row * 115f
+
+            val r =
+                l + (w - 75f) / 2f
+
+            val b =
+                t + 92f
+
+            paint.color = colors[colorOptions[i]]
+
+            canvas.drawRoundRect(
+                l,
+                t,
+                r,
+                b,
+                22f,
+                22f,
+                paint
+            )
+        }
+
+        text(
+            canvas,
+            "Tap the same color",
+            w / 2f,
+            535f,
+            12f,
+            0xff9aa6c6.toInt(),
+            false,
+            Paint.Align.CENTER
+        )
+    }
+
+    // =========================================================
+    // MEMORY MATRIX
+    // =========================================================
+
+    private fun drawMemoryGame(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        text(
+            canvas,
+            "Remember the glowing cells",
+            w / 2f,
+            94f,
+            17f,
+            Color.WHITE,
+            true,
+            Paint.Align.CENTER
+        )
+
+        text(
+            canvas,
+            "Level $memoryLevel",
+            w / 2f,
+            118f,
+            11f,
+            0xff91a0c5.toInt(),
+            false,
+            Paint.Align.CENTER
+        )
+
+        val grid = 4
+        val size = min(w - 50f, 330f)
+        val left = (w - size) / 2f
+        val top = 150f
+        val cell = size / grid
+
+        for (i in 0 until 16) {
+
+            val row = i / grid
+            val col = i % grid
+
+            val l = left + col * cell + 5f
+            val t = top + row * cell + 5f
+            val r = left + (col + 1) * cell - 5f
+            val b = top + (row + 1) * cell - 5f
+
+            val glowing =
+                memoryShowing &&
+                        memoryPattern.contains(i)
+
+            val userSelected =
+                memoryUser.contains(i)
+
+            paint.color =
+                when {
+                    glowing ->
+                        0xff55e6ff.toInt()
+
+                    userSelected ->
+                        0xff8e62ff.toInt()
+
+                    else ->
+                        0xff101a42.toInt()
+                }
+
+            canvas.drawRoundRect(
+                l,
+                t,
+                r,
+                b,
+                14f,
+                14f,
+                paint
+            )
+        }
+
+        text(
+            canvas,
+            if (memoryShowing)
+                "WATCH..."
+            else
+                "REPEAT THE PATTERN",
+            w / 2f,
+            top + size + 45f,
+            14f,
+            if (memoryShowing)
+                0xff55e6ff.toInt()
+            else
+                Color.WHITE,
+            true,
+            Paint.Align.CENTER
+        )
+
+        if (!gameStarted) {
+            button(
+                canvas,
+                "START MEMORY",
+                45f,
+                h - 150f,
+                w - 45f,
+                h - 98f
+            )
+        }
+    }
+
+    // =========================================================
+    // NUMBER FLOW
+    // =========================================================
+
+    private fun drawNumberGame(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        text(
+            canvas,
+            "Tap numbers in order",
+            w / 2f,
+            96f,
+            18f,
+            Color.WHITE,
+            true,
+            Paint.Align.CENTER
+        )
+
+        text(
+            canvas,
+            if (nextNumber <= 9)
+                "Next: $nextNumber"
+            else
+                "Perfect!",
+            w / 2f,
+            122f,
             13f,
-            0xffaeb9d8.toInt(),
+            0xff55e5ff.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
+
+        if (!gameStarted) {
+            button(
+                canvas,
+                "START NUMBER FLOW",
+                40f,
+                h * .43f,
+                w - 40f,
+                h * .43f + 52f
+            )
+            return
+        }
+
+        for (i in 0 until 9) {
+
+            paint.color =
+                if (i + 1 < nextNumber)
+                    0xff27315b.toInt()
+                else
+                    0xff14204a.toInt()
+
+            canvas.drawCircle(
+                numberPositions[i].x,
+                numberPositions[i].y,
+                38f,
+                paint
+            )
+
+            text(
+                canvas,
+                "${i + 1}",
+                numberPositions[i].x,
+                numberPositions[i].y + 9f,
+                20f,
+                if (i + 1 < nextNumber)
+                    0xff697493.toInt()
+                else
+                    Color.WHITE,
+                true,
+                Paint.Align.CENTER
+            )
+        }
+    }
+
+    // =========================================================
+    // REACTION
+    // =========================================================
+
+    private fun drawReactionGame(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        text(
+            canvas,
+            "Wait for green",
+            w / 2f,
+            100f,
+            20f,
+            Color.WHITE,
+            true,
+            Paint.Align.CENTER
+        )
+
+        text(
+            canvas,
+            reactionMessage,
+            w / 2f,
+            130f,
+            12f,
+            0xffa3aecf.toInt(),
+            true,
+            Paint.Align.CENTER
+        )
+
+        val color =
+            if (reactionReady)
+                0xff55e887.toInt()
+            else
+                0xffff5577.toInt()
+
+        paint.color = color
+
+        canvas.drawCircle(
+            w / 2f,
+            h * .43f,
+            105f + sin(animation * 2f) * 8f,
+            paint
+        )
+
+        text(
+            canvas,
+            if (reactionReady) "TAP!" else "WAIT",
+            w / 2f,
+            h * .43f + 15f,
+            25f,
+            Color.WHITE,
+            true,
+            Paint.Align.CENTER
+        )
+
+        if (!gameStarted) {
+            button(
+                canvas,
+                "START REACTION",
+                40f,
+                h - 160f,
+                w - 40f,
+                h - 108f
+            )
+        }
+    }
+
+    // =========================================================
+    // ZEN BREATH
+    // =========================================================
+
+    private fun drawBreathGame(
+        canvas: Canvas,
+        w: Float,
+        h: Float
+    ) {
+        text(
+            canvas,
+            "Slow breathing reset",
+            w / 2f,
+            100f,
+            20f,
+            Color.WHITE,
+            true,
+            Paint.Align.CENTER
+        )
+
+        val phase =
+            if (breathRunning) {
+                ((System.currentTimeMillis() -
+                        breathStartedAt) % 8000L) / 8000f
+            } else {
+                0.5f
+            }
+
+        val scale =
+            if (breathRunning) {
+                if (phase < .5f) {
+                    .65f + phase * .7f
+                } else {
+                    1.0f - (phase - .5f) * .7f
+                }
+            } else {
+                .72f
+            }
+
+        paint.color = Color.argb(
+            35,
+            80,
+            230,
+            200
+        )
+
+        canvas.drawCircle(
+            w / 2f,
+            h * .42f,
+            150f * scale,
+            paint
+        )
+
+        paint.color = 0xff65e7c5.toInt()
+
+        canvas.drawCircle(
+            w / 2f,
+            h * .42f,
+            85f * scale,
+            paint
+        )
+
+        text(
+            canvas,
+            if (!breathRunning)
+                "READY"
+            else if (phase < .5f)
+                "BREATHE IN"
+            else
+                "BREATHE OUT",
+            w / 2f,
+            h * .42f + 8f,
+            17f,
+            Color.WHITE,
+            true,
+            Paint.Align.CENTER
+        )
+
+        text(
+            canvas,
+            "Follow the expanding circle",
+            w / 2f,
+            h * .42f + 150f,
+            12f,
+            0xffa2adcc.toInt(),
             false,
             Paint.Align.CENTER
         )
 
         button(
-            c,
-            if (musicPlaying) "PAUSE MUSIC" else "PLAY MUSIC",
+            canvas,
+            if (breathRunning) "STOP" else "START BREATHING",
             45f,
-            310f,
+            h - 155f,
             w - 45f,
-            365f
+            h - 103f
+        )
+    }
+
+    // =========================================================
+    // MUSIC ICON
+    // =========================================================
+
+    private fun iconMusic(
+        canvas: Canvas,
+        x: Float,
+        y: Float,
+        size: Float
+    ) {
+        paint.color = 0xff63e6ff.toInt()
+
+        paint.strokeWidth = 3f
+        paint.style = Paint.Style.STROKE
+
+        canvas.drawLine(
+            x,
+            y - size,
+            x,
+            y + size,
+            paint
         )
 
-        text(
-            c,
-            "Tip: add mind_refreshing.mp3",
-            w / 2f,
-            415f,
-            13f,
-            0xff8f9cbe.toInt(),
-            false,
-            Paint.Align.CENTER
+        canvas.drawLine(
+            x,
+            y - size,
+            x + size * .8f,
+            y - size * .7f,
+            paint
         )
 
-        text(
-            c,
-            "inside app/src/main/res/raw/",
-            w / 2f,
-            438f,
-            12f,
-            0xff7885aa.toInt(),
-            false,
-            Paint.Align.CENTER
-        )
+        paint.style = Paint.Style.FILL
 
-        navigation(c, w, h, 2)
+        canvas.drawCircle(
+            x - 4f,
+            y + size,
+            size * .38f,
+            paint
+        )
     }
 
     // =========================================================
@@ -1104,42 +2128,35 @@ private class MindBlowView(
     // =========================================================
 
     private fun drawToast(
-        c: Canvas,
+        canvas: Canvas,
         w: Float,
         h: Float
     ) {
         card(
-            c,
-            25f,
+            canvas,
+            35f,
             h - 135f,
-            w - 25f,
-            h - 82f,
+            w - 35f,
+            h - 85f,
             18f
         )
 
         text(
-            c,
-            toastText,
+            canvas,
+            message,
             w / 2f,
-            h - 103f,
-            13f,
+            h - 104f,
+            12f,
             Color.WHITE,
             true,
             Paint.Align.CENTER
         )
     }
 
-    private fun toast(message: String) {
-        toastText = message
-        toastUntil = System.currentTimeMillis() + 1400L
-    }
-
-    private fun save() {
-        prefs.edit()
-            .putBoolean("started", true)
-            .putInt("score", score)
-            .putInt("streak", streak)
-            .apply()
+    private fun showMessage(value: String) {
+        message = value
+        messageUntil =
+            System.currentTimeMillis() + 1500L
     }
 
     // =========================================================
@@ -1159,30 +2176,25 @@ private class MindBlowView(
 
         when (screen) {
 
-            Screen.WELCOME -> {
-                if (y > h * .68f) {
-                    prefs.edit().putBoolean("started", true).apply()
-                    screen = Screen.HOME
-                }
+            Screen.HOME -> {
+                homeTouch(x, y, w, h)
             }
 
-            Screen.HOME -> homeTouch(x, y, w, h)
+            Screen.GAMES -> {
+                gamesTouch(x, y, w, h)
+            }
 
-            Screen.GAMES -> gamesTouch(x, y, w, h)
+            Screen.MUSIC -> {
+                musicTouch(x, y, w, h)
+            }
 
-            Screen.PUZZLE -> puzzleTouch(x, y, w, h)
+            Screen.PROFILE -> {
+                profileTouch(x, y, w, h)
+            }
 
-            Screen.MEMORY -> memoryTouch(x, y, w, h)
-
-            Screen.REACTION -> reactionTouch(x, y, w, h)
-
-            Screen.COLORS -> colorTouch(x, y, w, h)
-
-            Screen.NUMBERS -> numberTouch(x, y, w, h)
-
-            Screen.BREATHE -> breatheTouch(y, w, h)
-
-            Screen.MUSIC -> musicTouch(x, y, w, h)
+            Screen.GAME -> {
+                gameTouch(x, y, w, h)
+            }
         }
 
         invalidate()
@@ -1202,54 +2214,43 @@ private class MindBlowView(
 
         if (y > h - 90f) {
 
-            if (x < w * .25f) {
-                return
-            }
+            when {
+                x < w * .25f ->
+                    screen = Screen.HOME
 
-            if (x < w * .50f) {
-                screen = Screen.GAMES
-                return
-            }
+                x < w * .50f ->
+                    screen = Screen.GAMES
 
-            if (x < w * .75f) {
-                screen = Screen.MUSIC
-                return
+                x < w * .75f ->
+                    screen = Screen.MUSIC
+
+                else ->
+                    screen = Screen.PROFILE
             }
 
             return
         }
 
-        if (y in 230f..325f) {
-            screen =
-                if (x < w / 2f) Screen.PUZZLE
-                else {
-                    startMemory()
-                    Screen.MEMORY
-                }
+        // Music card
+        if (y in 214f..270f) {
+            toggleMusic()
             return
         }
 
-        if (y in 335f..430f) {
-            screen =
-                if (x < w / 2f) {
-                    startReaction()
-                    Screen.REACTION
-                } else {
-                    startColors()
-                    Screen.COLORS
-                }
-            return
-        }
+        // six games
+        if (y in 315f..624f) {
 
-        if (y in 440f..550f) {
-            screen =
-                if (x < w / 2f) {
-                    startNumbers()
-                    Screen.NUMBERS
-                } else {
-                    breathStart = System.currentTimeMillis()
-                    Screen.BREATHE
+            val gameIndex =
+                when {
+                    y < 418f && x < w / 2f -> 0
+                    y < 418f -> 1
+                    y < 523f && x < w / 2f -> 2
+                    y < 523f -> 3
+                    y < 630f && x < w / 2f -> 4
+                    else -> 5
                 }
+
+            openGame(gameIndex)
         }
     }
 
@@ -1264,460 +2265,57 @@ private class MindBlowView(
         h: Float
     ) {
 
+        if (y > h - 90f) {
+
+            when {
+                x < w * .25f ->
+                    screen = Screen.HOME
+
+                x < w * .50f ->
+                    screen = Screen.GAMES
+
+                x < w * .75f ->
+                    screen = Screen.MUSIC
+
+                else ->
+                    screen = Screen.PROFILE
+            }
+
+            return
+        }
+
         if (y < 75f) {
             screen = Screen.HOME
             return
         }
 
-        if (y > h - 90f) {
+        val gameIndex =
+            when {
+                y in 90f..185f &&
+                        x < w / 2f -> 0
 
-            if (x < w * .25f) {
-                screen = Screen.HOME
-            } else if (x < w * .50f) {
-                screen = Screen.GAMES
-            } else if (x < w * .75f) {
-                screen = Screen.MUSIC
+                y in 90f..185f -> 1
+
+                y in 195f..290f &&
+                        x < w / 2f -> 2
+
+                y in 195f..290f -> 3
+
+                y in 300f..395f &&
+                        x < w / 2f -> 4
+
+                y in 300f..395f -> 5
+
+                else -> -1
             }
 
-            return
-        }
-
-        if (y in 90f..185f) {
-
-            screen =
-                if (x < w / 2f) {
-                    Screen.PUZZLE
-                } else {
-                    startMemory()
-                    Screen.MEMORY
-                }
-
-            return
-        }
-
-        if (y in 198f..293f) {
-
-            screen =
-                if (x < w / 2f) {
-                    startReaction()
-                    Screen.REACTION
-                } else {
-                    startColors()
-                    Screen.COLORS
-                }
-
-            return
-        }
-
-        if (y in 306f..401f) {
-
-            screen =
-                if (x < w / 2f) {
-                    startNumbers()
-                    Screen.NUMBERS
-                } else {
-                    breathStart = System.currentTimeMillis()
-                    Screen.BREATHE
-                }
+        if (gameIndex >= 0) {
+            openGame(gameIndex)
         }
     }
 
     // =========================================================
-    // PUZZLE TOUCH
-    // =========================================================
-
-    private fun puzzleTouch(
-        x: Float,
-        y: Float,
-        w: Float,
-        h: Float
-    ) {
-
-        if (y < 75f) {
-            screen = Screen.GAMES
-            return
-        }
-
-        val size = min(w * .82f, 330f)
-        val left = (w - size) / 2f
-        val top = 100f
-        val cell = size / 4f
-
-        if (
-            x >= left &&
-            x <= left + size &&
-            y >= top &&
-            y <= top + size
-        ) {
-
-            val col = ((x - left) / cell).toInt()
-            val row = ((y - top) / cell).toInt()
-
-            val index = row * 4 + col
-
-            if (index == puzzleTarget) {
-
-                score += 25
-                save()
-
-                puzzleTarget = Random.nextInt(16)
-
-                toast("Perfect! +25 XP")
-
-            } else {
-                toast("Almost! Find the glow.")
-            }
-        }
-    }
-
-    // =========================================================
-    // MEMORY
-    // =========================================================
-
-    private fun startMemory() {
-
-        memoryBoard =
-            MutableList(9) { it }.apply { shuffle() }
-
-        memoryFirst = -1
-        memorySecond = -1
-        memoryPreview = true
-
-        handler.postDelayed({
-            memoryPreview = false
-            invalidate()
-        }, 2200L)
-    }
-
-    private fun memoryTouch(
-        x: Float,
-        y: Float,
-        w: Float,
-        h: Float
-    ) {
-
-        if (y < 75f) {
-            screen = Screen.GAMES
-            return
-        }
-
-        if (memoryPreview) return
-
-        val size = min(w * .82f, 320f)
-        val left = (w - size) / 2f
-        val top = 100f
-        val cell = size / 3f
-
-        if (
-            x < left ||
-            x > left + size ||
-            y < top ||
-            y > top + size
-        ) {
-            return
-        }
-
-        val col = ((x - left) / cell).toInt().coerceIn(0, 2)
-        val row = ((y - top) / cell).toInt().coerceIn(0, 2)
-
-        val index = row * 3 + col
-
-        if (memoryFirst == -1) {
-
-            memoryFirst = index
-
-        } else if (
-            memorySecond == -1 &&
-            index != memoryFirst
-        ) {
-
-            memorySecond = index
-
-            if (
-                memoryBoard[memoryFirst] ==
-                memoryBoard[memorySecond]
-            ) {
-
-                score += 20
-                save()
-
-                toast("MATCH! +20 XP")
-
-                handler.postDelayed({
-                    memoryFirst = -1
-                    memorySecond = -1
-                    invalidate()
-                }, 500L)
-
-            } else {
-
-                toast("Try again")
-
-                handler.postDelayed({
-                    memoryFirst = -1
-                    memorySecond = -1
-                    invalidate()
-                }, 700L)
-            }
-        }
-    }
-
-    // =========================================================
-    // REACTION
-    // =========================================================
-
-    private fun startReaction() {
-
-        reactionReady = false
-        reactionWaiting = true
-
-        val delay = Random.nextLong(1000L, 3500L)
-
-        handler.postDelayed({
-
-            if (screen == Screen.REACTION) {
-                reactionWaiting = false
-                reactionReady = true
-                reactionStart = System.currentTimeMillis()
-                invalidate()
-            }
-
-        }, delay)
-    }
-
-    private fun reactionTouch(
-        x: Float,
-        y: Float,
-        w: Float,
-        h: Float
-    ) {
-
-        if (y < 75f) {
-            screen = Screen.GAMES
-            return
-        }
-
-        if (reactionWaiting) {
-            toast("Too early!")
-            reactionWaiting = false
-            reactionReady = false
-            return
-        }
-
-        if (reactionReady) {
-
-            val reaction =
-                System.currentTimeMillis() - reactionStart
-
-            score += 20
-            save()
-
-            toast("${reaction}ms • +20 XP")
-
-            reactionReady = false
-
-            handler.postDelayed({
-                if (screen == Screen.REACTION) {
-                    startReaction()
-                    invalidate()
-                }
-            }, 900L)
-
-        } else {
-            startReaction()
-        }
-    }
-
-    // =========================================================
-    // COLORS
-    // =========================================================
-
-    private fun startColors() {
-        colorRound = 0
-        colorCorrect = Random.nextInt(4)
-    }
-
-    private fun colorTouch(
-        x: Float,
-        y: Float,
-        w: Float,
-        h: Float
-    ) {
-
-        if (y < 75f) {
-            screen = Screen.GAMES
-            return
-        }
-
-        val size = min(w * .82f, 320f)
-        val left = (w - size) / 2f
-        val top = 115f
-        val cell = size / 3f
-
-        if (
-            x < left ||
-            x > left + size ||
-            y < top ||
-            y > top + size
-        ) {
-            return
-        }
-
-        val col = ((x - left) / cell).toInt().coerceIn(0, 2)
-        val row = ((y - top) / cell).toInt().coerceIn(0, 2)
-
-        val index = row * 3 + col
-        val odd = (colorRound + 1) % 9
-
-        if (index == odd) {
-
-            score += 15
-            colorRound++
-            colorCorrect = Random.nextInt(4)
-            save()
-
-            toast("Great eye! +15 XP")
-
-        } else {
-            toast("Look closely...")
-        }
-    }
-
-    // =========================================================
-    // NUMBER FLOW
-    // =========================================================
-
-    private fun startNumbers() {
-
-        numberRound = 1
-        numberInput = ""
-        createNumber()
-    }
-
-    private fun createNumber() {
-
-        val length = min(3 + numberRound, 7)
-
-        numberSequence = buildString {
-            repeat(length) {
-                append(Random.nextInt(0, 10))
-            }
-        }
-
-        showingNumber = true
-        numberInput = ""
-
-        handler.postDelayed({
-
-            if (screen == Screen.NUMBERS) {
-                showingNumber = false
-                invalidate()
-            }
-
-        }, 1800L)
-    }
-
-    private fun numberTouch(
-        x: Float,
-        y: Float,
-        w: Float,
-        h: Float
-    ) {
-
-        if (y < 75f) {
-            screen = Screen.GAMES
-            return
-        }
-
-        if (showingNumber) return
-
-        if (
-            y >= 365f &&
-            y <= 600f
-        ) {
-
-            val bw = (w - 80f) / 3f
-
-            val col =
-                ((x - 20f) / (bw + 10f)).toInt()
-
-            val row =
-                ((y - 365f) / 53f).toInt()
-
-            if (
-                col in 0..2 &&
-                row in 0..3
-            ) {
-
-                val index = row * 3 + col
-
-                val digit =
-                    if (index < 9) {
-                        (index + 1).toString()
-                    } else {
-                        "0"
-                    }
-
-                numberInput += digit
-                invalidate()
-                return
-            }
-        }
-
-        if (y in 280f..350f) {
-
-            if (numberInput == numberSequence) {
-
-                score += 25
-                numberRound++
-
-                save()
-
-                toast("Excellent! +25 XP")
-
-                handler.postDelayed({
-                    if (screen == Screen.NUMBERS) {
-                        createNumber()
-                        invalidate()
-                    }
-                }, 600L)
-
-            } else {
-
-                toast("Not quite. Try again.")
-                numberInput = ""
-            }
-        }
-    }
-
-    // =========================================================
-    // BREATHE TOUCH
-    // =========================================================
-
-    private fun breatheTouch(
-        y: Float,
-        w: Float,
-        h: Float
-    ) {
-
-        if (y < 75f) {
-            screen = Screen.GAMES
-            return
-        }
-
-        if (y in 430f..530f) {
-
-            score += 10
-            streak++
-
-            save()
-
-            toast("Nice reset! +10 XP")
-        }
-    }
-
-    // =========================================================
-    // MUSIC
+    // MUSIC TOUCH
     // =========================================================
 
     private fun musicTouch(
@@ -1727,72 +2325,689 @@ private class MindBlowView(
         h: Float
     ) {
 
+        if (y > h - 90f) {
+
+            when {
+                x < w * .25f ->
+                    screen = Screen.HOME
+
+                x < w * .50f ->
+                    screen = Screen.GAMES
+
+                x < w * .75f ->
+                    screen = Screen.MUSIC
+
+                else ->
+                    screen = Screen.PROFILE
+            }
+
+            return
+        }
+
         if (y < 75f) {
             screen = Screen.HOME
             return
         }
 
-        if (y > h - 90f) {
-
-            if (x < w * .25f) {
-                screen = Screen.HOME
-            } else if (x < w * .50f) {
-                screen = Screen.GAMES
-            } else if (x < w * .75f) {
-                screen = Screen.MUSIC
-            }
-
-            return
-        }
-
-        if (y in 300f..390f) {
+        if (y in 100f..310f) {
             toggleMusic()
         }
     }
 
-    private fun toggleMusic() {
+    // =========================================================
+    // PROFILE TOUCH
+    // =========================================================
 
-        if (musicPlaying) {
+    private fun profileTouch(
+        x: Float,
+        y: Float,
+        w: Float,
+        h: Float
+    ) {
 
-            mediaPlayer?.pause()
-            musicPlaying = false
-            toast("Music paused")
+        if (y > h - 90f) {
+
+            when {
+                x < w * .25f ->
+                    screen = Screen.HOME
+
+                x < w * .50f ->
+                    screen = Screen.GAMES
+
+                x < w * .75f ->
+                    screen = Screen.MUSIC
+
+                else ->
+                    screen = Screen.PROFILE
+            }
+        }
+    }
+
+    // =========================================================
+    // GAME TOUCH
+    // =========================================================
+
+    private fun gameTouch(
+        x: Float,
+        y: Float,
+        w: Float,
+        h: Float
+    ) {
+
+        if (y < 75f) {
+            screen = Screen.GAMES
             return
         }
 
-        if (mediaPlayer == null) {
+        when (selectedGame) {
 
-            val resourceId =
-                ctx.resources.getIdentifier(
-                    "mind_refreshing",
-                    "raw",
-                    ctx.packageName
-                )
+            GameType.PULSE ->
+                pulseTouch(x, y)
 
-            if (resourceId == 0) {
+            GameType.COLOR ->
+                colorTouch(x, y, w)
 
-                toast("Add mind_refreshing.mp3 to res/raw")
+            GameType.MEMORY ->
+                memoryTouch(x, y, w)
 
-                return
+            GameType.NUMBER ->
+                numberTouch(x, y)
+
+            GameType.REACTION ->
+                reactionTouch()
+
+            GameType.BREATH ->
+                breathTouch()
+        }
+    }
+
+    // =========================================================
+    // OPEN GAME
+    // =========================================================
+
+    private fun openGame(index: Int) {
+
+        selectedGame =
+            when (index) {
+                0 -> GameType.PULSE
+                1 -> GameType.MEMORY
+                2 -> GameType.REACTION
+                3 -> GameType.COLOR
+                4 -> GameType.NUMBER
+                else -> GameType.BREATH
             }
 
-            mediaPlayer =
-                MediaPlayer.create(ctx, resourceId)
+        resetGame()
 
-            mediaPlayer?.isLooping = true
+        screen = Screen.GAME
+    }
+
+    private fun resetGame() {
+
+        gameStarted = false
+        gameScore = 0
+
+        pulseRound = 0
+
+        colorCorrect =
+            Random.nextInt(4)
+
+        colorTarget =
+            Random.nextInt(4)
+
+        colorOptions =
+            IntArray(4) { it }
+
+        colorOptions.shuffle()
+
+        memoryLevel = 1
+        memoryUser.clear()
+        memoryPattern.clear()
+        memoryShowing = true
+
+        nextNumber = 1
+
+        reactionReady = false
+        reactionMessage = "WAIT..."
+        reactionDelayUntil = 0L
+
+        breathRunning = false
+    }
+
+    // =========================================================
+    // PULSE TOUCH
+    // =========================================================
+
+    private fun pulseTouch(
+        x: Float,
+        y: Float
+    ) {
+
+        if (!gameStarted) {
+            gameStarted = true
+            score += 5
+            showMessage("Pulse Hunt started!")
+            vibrate()
+            return
         }
 
-        mediaPlayer?.start()
-        musicPlaying = true
+        val dx = x - pulseX
+        val dy = y - pulseY
 
-        toast("Mind music playing")
+        if (dx * dx + dy * dy <= 80f * 80f) {
+
+            gameScore += 10
+            score += 10
+
+            pulseRound++
+
+            vibrate()
+
+            showMessage("+10 XP • Great!")
+
+            if (pulseRound >= 10) {
+                finishGame()
+            }
+        }
+    }
+
+    // =========================================================
+    // COLOR TOUCH
+    // =========================================================
+
+    private fun colorTouch(
+        x: Float,
+        y: Float,
+        w: Float
+    ) {
+
+        if (y < 270f) {
+            return
+        }
+
+        val col =
+            if (x < w / 2f) 0 else 1
+
+        val row =
+            if (y < 390f) 0 else 1
+
+        val index =
+            row * 2 + col
+
+        if (index !in 0..3) return
+
+        if (colorOptions[index] == colorTarget) {
+
+            gameScore += 10
+            score += 10
+
+            vibrate()
+
+            showMessage("Correct! +10 XP")
+
+            colorTarget =
+                Random.nextInt(4)
+
+            colorOptions =
+                IntArray(4) { it }
+
+            colorOptions.shuffle()
+
+        } else {
+            showMessage("Try again!")
+        }
+    }
+
+    // =========================================================
+    // MEMORY
+    // =========================================================
+
+    private fun memoryTouch(
+        x: Float,
+        y: Float,
+        w: Float
+    ) {
+
+        if (!gameStarted) {
+
+            gameStarted = true
+
+            memoryPattern.clear()
+            memoryUser.clear()
+
+            repeat(
+                min(
+                    3 + memoryLevel,
+                    8
+                )
+            ) {
+                var value: Int
+
+                do {
+                    value = Random.nextInt(16)
+                } while (
+                    memoryPattern.contains(value)
+                )
+
+                memoryPattern.add(value)
+            }
+
+            memoryShowing = true
+            memoryShowUntil =
+                System.currentTimeMillis() + 1800L
+
+            showMessage("Watch carefully!")
+            return
+        }
+
+        if (
+            memoryShowing &&
+            System.currentTimeMillis() >= memoryShowUntil
+        ) {
+            memoryShowing = false
+        }
+
+        if (memoryShowing) {
+            return
+        }
+
+        val size = min(w - 50f, 330f)
+        val left = (w - size) / 2f
+        val top = 150f
+        val cell = size / 4f
+
+        if (
+            x < left ||
+            x > left + size ||
+            y < top ||
+            y > top + size
+        ) return
+
+        val col =
+            ((x - left) / cell)
+                .toInt()
+                .coerceIn(0, 3)
+
+        val row =
+            ((y - top) / cell)
+                .toInt()
+                .coerceIn(0, 3)
+
+        val index =
+            row * 4 + col
+
+        if (memoryUser.contains(index)) return
+
+        memoryUser.add(index)
+
+        if (!memoryPattern.contains(index)) {
+
+            showMessage("Wrong cell — try again")
+
+            memoryUser.clear()
+
+            memoryShowing = true
+            memoryShowUntil =
+                System.currentTimeMillis() + 1200L
+
+            return
+        }
+
+        if (
+            memoryUser.size ==
+            memoryPattern.size
+        ) {
+
+            gameScore += memoryLevel * 10
+            score += memoryLevel * 10
+
+            vibrate()
+
+            showMessage(
+                "Pattern cleared! +${memoryLevel * 10} XP"
+            )
+
+            memoryLevel++
+
+            memoryUser.clear()
+            memoryPattern.clear()
+
+            memoryShowing = true
+
+            memoryShowUntil =
+                System.currentTimeMillis() + 1500L
+
+            repeat(
+                min(
+                    3 + memoryLevel,
+                    8
+                )
+            ) {
+                var value: Int
+
+                do {
+                    value = Random.nextInt(16)
+                } while (
+                    memoryPattern.contains(value)
+                )
+
+                memoryPattern.add(value)
+            }
+        }
+    }
+
+    // =========================================================
+    // NUMBER FLOW
+    // =========================================================
+
+    private fun numberTouch(
+        x: Float,
+        y: Float
+    ) {
+
+        if (!gameStarted) {
+
+            gameStarted = true
+            nextNumber = 1
+            numberStart =
+                System.currentTimeMillis()
+
+            generateNumberPositions()
+
+            showMessage("Go!")
+
+            return
+        }
+
+        if (nextNumber > 9) return
+
+        val p =
+            numberPositions[nextNumber - 1]
+
+        val dx = x - p.x
+        val dy = y - p.y
+
+        if (
+            dx * dx +
+            dy * dy <=
+            45f * 45f
+        ) {
+
+            nextNumber++
+
+            gameScore += 5
+            score += 5
+
+            vibrate()
+
+            if (nextNumber > 9) {
+
+                val elapsed =
+                    System.currentTimeMillis() -
+                            numberStart
+
+                val bonus =
+                    if (elapsed < 7000L) 25 else 10
+
+                score += bonus
+                gameScore += bonus
+
+                showMessage(
+                    "Perfect flow! +$bonus bonus"
+                )
+
+            } else {
+                showMessage("Good! Next $nextNumber")
+            }
+        }
+    }
+
+    private fun generateNumberPositions() {
+
+        val w = width.toFloat()
+        val h = height.toFloat()
+
+        val areaLeft = 65f
+        val areaRight = w - 65f
+        val areaTop = 175f
+        val areaBottom = h - 145f
+
+        for (i in 0 until 9) {
+
+            var x: Float
+            var y: Float
+
+            var valid: Boolean
+
+            do {
+
+                x =
+                    Random.nextFloat() *
+                            (areaRight - areaLeft) +
+                            areaLeft
+
+                y =
+                    Random.nextFloat() *
+                            (areaBottom - areaTop) +
+                            areaTop
+
+                valid = true
+
+                for (j in 0 until i) {
+
+                    val dx =
+                        x - numberPositions[j].x
+
+                    val dy =
+                        y - numberPositions[j].y
+
+                    if (
+                        dx * dx +
+                        dy * dy <
+                        85f * 85f
+                    ) {
+                        valid = false
+                        break
+                    }
+                }
+
+            } while (!valid)
+
+            numberPositions[i] =
+                PointF(x, y)
+        }
+    }
+
+    // =========================================================
+    // REACTION
+    // =========================================================
+
+    private fun reactionTouch() {
+
+        if (!gameStarted) {
+
+            gameStarted = true
+            reactionReady = false
+            reactionMessage = "WAIT..."
+
+            reactionDelayUntil =
+                System.currentTimeMillis() +
+                        Random.nextLong(1500L, 3500L)
+
+            return
+        }
+
+        if (!reactionReady) {
+
+            if (
+                System.currentTimeMillis() >=
+                reactionDelayUntil
+            ) {
+
+                reactionReady = true
+                reactionStartedAt =
+                    System.currentTimeMillis()
+
+                reactionMessage = "TAP NOW!"
+
+            } else {
+
+                showMessage(
+                    "Too early! Try again."
+                )
+
+                gameStarted = false
+            }
+
+            return
+        }
+
+        val reactionTime =
+            System.currentTimeMillis() -
+                    reactionStartedAt
+
+        val points =
+            when {
+                reactionTime < 250L -> 30
+                reactionTime < 450L -> 20
+                else -> 10
+            }
+
+        gameScore += points
+        score += points
+
+        vibrate()
+
+        showMessage(
+            "${reactionTime}ms • +$points XP"
+        )
+
+        gameStarted = false
+        reactionReady = false
+        reactionMessage = "WAIT..."
+    }
+
+    // =========================================================
+    // BREATH
+    // =========================================================
+
+    private fun breathTouch() {
+
+        if (!breathRunning) {
+
+            breathRunning = true
+            breathStartedAt =
+                System.currentTimeMillis()
+
+            showMessage(
+                "Breathe slowly..."
+            )
+
+        } else {
+
+            breathRunning = false
+
+            score += 15
+            gameScore += 15
+
+            vibrate()
+
+            showMessage(
+                "Nice reset! +15 XP"
+            )
+        }
+    }
+
+    // =========================================================
+    // FINISH GAME
+    // =========================================================
+
+    private fun finishGame() {
+
+        streak++
+
+        prefs.edit()
+            .putInt("score", score)
+            .putInt("streak", streak)
+            .apply()
+
+        showMessage(
+            "Game complete! +$gameScore XP"
+        )
+
+        gameStarted = false
+    }
+
+    // =========================================================
+    // VIBRATION
+    // =========================================================
+
+    private fun vibrate() {
+
+        try {
+
+            if (Build.VERSION.SDK_INT >= 26) {
+
+                vibrator?.vibrate(
+                    VibrationEffect.createOneShot(
+                        35L,
+                        VibrationEffect.DEFAULT_AMPLITUDE
+                    )
+                )
+
+            } else {
+
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(35L)
+            }
+
+        } catch (_: Exception) {
+        }
+    }
+
+    // =========================================================
+    // MUSIC
+    // =========================================================
+
+    private fun toggleMusic() {
+
+        musicOn = !musicOn
+
+        prefs.edit()
+            .putBoolean("music", musicOn)
+            .apply()
+
+        if (musicOn) {
+            startMusic()
+            showMessage("Mind music ON 🎵")
+        } else {
+            stopMusic()
+            showMessage("Mind music OFF")
+        }
+    }
+
+    private fun startMusic() {
+
+        if (ambientMusic == null) {
+
+            ambientMusic =
+                AmbientMusic().also {
+                    it.start()
+                }
+
+        } else {
+
+            ambientMusic?.start()
+        }
     }
 
     fun releaseMusic() {
+        stopMusic()
+    }
 
-        mediaPlayer?.release()
-        mediaPlayer = null
-        musicPlaying = false
+    private fun stopMusic() {
+        ambientMusic?.stop()
+        ambientMusic = null
     }
 
     // =========================================================
@@ -1801,15 +3016,215 @@ private class MindBlowView(
 
     fun goBack(): Boolean {
 
-        return if (screen == Screen.HOME || screen == Screen.WELCOME) {
-
-            false
-
-        } else {
-
-            screen = Screen.HOME
-            invalidate()
-            true
+        if (screen == Screen.GAME) {
+            screen = Screen.GAMES
+            return true
         }
+
+        if (screen != Screen.HOME) {
+            screen = Screen.HOME
+            return true
+        }
+
+        return false
+    }
+
+    // =========================================================
+    // AMBIENT MUSIC ENGINE
+    // No MP3 file required.
+    // =========================================================
+
+    private class AmbientMusic {
+
+        private val running =
+            AtomicBoolean(false)
+
+        private var thread: Thread? = null
+        private var track: AudioTrack? = null
+
+        private val sampleRate = 22050
+
+        fun start() {
+
+            if (running.get()) return
+
+            running.set(true)
+
+            thread = Thread {
+
+                try {
+
+                    val minBuffer =
+                        AudioTrack.getMinBufferSize(
+                            sampleRate,
+                            AudioFormat.CHANNEL_OUT_MONO,
+                            AudioFormat.ENCODING_PCM_16BIT
+                        )
+
+                    val bufferSize =
+                        maxOf(
+                            minBuffer,
+                            sampleRate / 2
+                        )
+
+                    val audioTrack =
+                        if (Build.VERSION.SDK_INT >= 23) {
+
+                            AudioTrack.Builder()
+                                .setAudioAttributes(
+                                    AudioAttributes.Builder()
+                                        .setUsage(
+                                            AudioAttributes.USAGE_MEDIA
+                                        )
+                                        .setContentType(
+                                            AudioAttributes.CONTENT_TYPE_MUSIC
+                                        )
+                                        .build()
+                                )
+                                .setAudioFormat(
+                                    AudioFormat.Builder()
+                                        .setSampleRate(
+                                            sampleRate
+                                        )
+                                        .setChannelMask(
+                                            AudioFormat.CHANNEL_OUT_MONO
+                                        )
+                                        .setEncoding(
+                                            AudioFormat.ENCODING_PCM_16BIT
+                                        )
+                                        .build()
+                                )
+                                .setBufferSizeInBytes(
+                                    bufferSize
+                                )
+                                .setTransferMode(
+                                    AudioTrack.MODE_STREAM
+                                )
+                                .build()
+
+                        } else {
+
+                            @Suppress("DEPRECATION")
+                            AudioTrack(
+                                android.media.AudioManager.STREAM_MUSIC,
+                                sampleRate,
+                                AudioFormat.CHANNEL_OUT_MONO,
+                                AudioFormat.ENCODING_PCM_16BIT,
+                                bufferSize,
+                                AudioTrack.MODE_STREAM
+                            )
+                        }
+
+                    track = audioTrack
+
+                    audioTrack.play()
+
+                    val samples =
+                        ShortArray(sampleRate / 2)
+
+                    var phase = 0.0
+                    var slowPhase = 0.0
+
+                    while (running.get()) {
+
+                        for (i in samples.indices) {
+
+                            val time =
+                                i.toDouble() /
+                                        sampleRate
+
+                            val tone1 =
+                                sin(
+                                    phase
+                                ) * 0.045
+
+                            val tone2 =
+                                sin(
+                                    slowPhase
+                                ) * 0.025
+
+                            val wave =
+                                tone1 + tone2
+
+                            samples[i] =
+                                (wave *
+                                        Short.MAX_VALUE)
+                                    .toInt()
+                                    .toShort()
+
+                            phase +=
+                                2.0 *
+                                        Math.PI *
+                                        174.0 /
+                                        sampleRate
+
+                            slowPhase +=
+                                2.0 *
+                                        Math.PI *
+                                        87.0 /
+                                        sampleRate
+
+                            if (phase > Math.PI * 2)
+                                phase -= Math.PI * 2
+
+                            if (slowPhase > Math.PI * 2)
+                                slowPhase -= Math.PI * 2
+                        }
+
+                        audioTrack.write(
+                            samples,
+                            0,
+                            samples.size
+                        )
+                    }
+
+                    try {
+                        audioTrack.stop()
+                    } catch (_: Exception) {
+                    }
+
+                    audioTrack.release()
+
+                    track = null
+
+                } catch (_: Exception) {
+
+                    track = null
+                }
+
+            }.apply {
+                isDaemon = true
+                start()
+            }
+        }
+
+        fun stop() {
+
+            running.set(false)
+
+            try {
+                track?.stop()
+            } catch (_: Exception) {
+            }
+
+            try {
+                track?.release()
+            } catch (_: Exception) {
+            }
+
+            track = null
+
+            thread?.interrupt()
+            thread = null
+        }
+    }
+
+    private fun saveProgress() {
+
+        prefs.edit()
+            .putInt("score", score)
+            .putInt("streak", streak)
+            .putBoolean("music", musicOn)
+            .apply()
     }
 }
